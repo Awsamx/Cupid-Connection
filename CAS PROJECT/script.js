@@ -1,4 +1,4 @@
-// --- 1. KONFIGURATION (Bitte deine Daten einfügen) ---
+// --- 1. KONFIGURATION ---
 const firebaseConfig = {
     apiKey: "AIzaSyANKW1Lu8nnZu2fY1S6HcUdn9pzT6-GRJY", 
     authDomain: "cupid-connection-ce199.firebaseapp.com",
@@ -9,16 +9,7 @@ const firebaseConfig = {
     measurementId: "G-BG2LW0BTDZ"
 };
 
-const msalConfig = {
-    auth: {
-        clientId: "2956b50e-9df2-45c1-bf9e-476da2ded255", 
-        authority: "https://login.microsoftonline.com/f7bb63a9-5ed7-4a21-b43a-3f684ec4938b",
-        redirectUri: window.location.origin
-    },
-    cache: { cacheLocation: "sessionStorage", storeAuthStateInCookie: false }
-};
-
-const loginRequest = { scopes: ["User.Read"] };
+// Hinweis: MSAL Config wurde entfernt, da wir jetzt nativen Firebase Auth nutzen!
 
 // --- 2. INITIALISIERUNG ---
 try {
@@ -30,8 +21,6 @@ try {
     const analytics = firebase.analytics();
 } catch(e) { console.error("Firebase Init Error:", e); }
 
-let myMSALObj;
-
 // --- 3. APP LOGIK ---
 const app = {
     data: { posts: [], orders: [] },
@@ -41,21 +30,20 @@ const app = {
     isVip: false,
 
     init: async () => {
-        try { myMSALObj = new msal.PublicClientApplication(msalConfig); } 
-        catch (e) { console.error("MSAL Init Error", e); }
-
-        const storedUser = sessionStorage.getItem('userEmail');
-        if (storedUser) {
-            app.login(storedUser); 
-        } else {
-            document.getElementById('auth-overlay').classList.remove('hidden');
-        }
-
+        // Prüfen, ob User bereits eingeloggt ist (Persistenz)
         auth.onAuthStateChanged((user) => {
-            if (user && !user.isAnonymous) { 
-                sessionStorage.setItem('adminUser', user.email);
+            if (user) {
+                // User ist eingeloggt
+                app.handleLoginSuccess(user);
+            } else {
+                // Kein User -> Login Screen zeigen
+                document.getElementById('auth-overlay').classList.remove('hidden');
             }
         });
+
+        // Admin Session Check (Optional, falls du manuelle Admin-Logins nutzt)
+        const adminUser = sessionStorage.getItem('adminUser');
+        if(adminUser) console.log("Admin Session aktiv");
 
         app.updateCountdown();
         setInterval(app.updateCountdown, 1000);
@@ -101,67 +89,83 @@ const app = {
 
     // --- NEUE HILFSFUNKTION: VIP STATUS BERECHNEN ---
     getVipList: () => {
-        // 1. Nur bezahlte Bestellungen filtern (Briefe ignorieren)
         const paidOrders = (app.data.orders || []).filter(o => {
             const isPaidProduct = ['Keks', 'Rose', 'Full Combo'].includes(o.product);
-            // Preis muss > 0 sein ODER es ist ein Bezahl-Produkt (für alte Daten)
             return (o.priceAtOrder > 0) || (isPaidProduct && o.product !== 'Brief');
         });
 
-        // 2. Nach Zeit sortieren (älteste zuerst)
         const sorted = paidOrders.sort((a, b) => a.timestamp - b.timestamp);
-
-        // 3. Die ersten 100 eindeutigen Absender zurückgeben
         return new Set(sorted.slice(0, 100).map(o => o.sender));
     },
 
+    // --- NEUER LOGIN PROZESS (NATIVE FIREBASE AUTH) ---
     loginWithMicrosoft: async () => {
-        if (!myMSALObj) return alert("MSAL Config Error");
-        document.getElementById('login-container').classList.add('hidden');
-        document.getElementById('auth-loading').classList.remove('hidden');
+        const provider = new firebase.auth.OAuthProvider('microsoft.com');
+
+        // Tenant-ID erzwingt Login nur für deine Schule
+        provider.setCustomParameters({
+            prompt: 'select_account',
+            tenant: 'f7bb63a9-5ed7-4a21-b43a-3f684ec4938b' 
+        });
 
         try {
-            const response = await myMSALObj.loginPopup(loginRequest);
-            const email = response.account.username;
-            if (email.toLowerCase().endsWith('@europagym.at')) {
-                await app.login(email.toLowerCase()); 
+            document.getElementById('login-container').classList.add('hidden');
+            document.getElementById('auth-loading').classList.remove('hidden');
+
+            const result = await auth.signInWithPopup(provider);
+            const user = result.user;
+            
+            // Zusätzliche E-Mail Prüfung (Sicher ist sicher)
+            if (user.email && user.email.toLowerCase().endsWith('@europagym.at')) {
+                // Alles gut, Login wird durch onAuthStateChanged behandelt
             } else {
-                alert("Nur @europagym.at erlaubt!");
+                await auth.signOut();
+                alert("Zugriff verweigert: Nur @europagym.at Adressen erlaubt.");
                 location.reload();
             }
+
         } catch (error) {
-            console.error(error);
+            console.error("Login Fehler:", error);
+            alert("Login fehlgeschlagen: " + error.message);
             location.reload();
         }
     },
 
-    login: async (email) => {
-        if (!email.includes('@')) return alert("Ungültige E-Mail");
-        try {
-            if (!auth.currentUser) {
-                await auth.signInAnonymously();
-            }
-            app.currentUser = email;
-            sessionStorage.setItem('userEmail', email);
-            document.getElementById('auth-overlay').classList.add('hidden');
-            document.getElementById('safety-banner').classList.remove('hidden');
-            document.getElementById('current-user').innerText = email.split('@')[0];
-            document.getElementById('user-initials').innerText = email.charAt(0).toUpperCase();
-            document.getElementById('profile-email').innerText = email;
-            
-            if(app.data.orders.length > 0) app.checkVipStatus();
-            app.showToast("Erfolgreich eingeloggt 🚀");
-        } catch (error) {
-            console.error("Login Fehler:", error);
-            alert("Verbindung fehlgeschlagen.");
-            location.reload();
+    // Wird aufgerufen, wenn Auth erfolgreich war
+    handleLoginSuccess: (user) => {
+        if (!user.email.toLowerCase().endsWith('@europagym.at')) {
+            auth.signOut();
+            return;
         }
+
+        app.currentUser = user.email.toLowerCase();
+        sessionStorage.setItem('userEmail', app.currentUser);
+
+        // UI Updates
+        document.getElementById('auth-overlay').classList.add('hidden');
+        document.getElementById('safety-banner').classList.remove('hidden');
+        
+        // Name extrahieren (Vorname Nachname aus Email oder DisplayName)
+        let displayName = user.displayName || app.currentUser.split('@')[0];
+        document.getElementById('current-user').innerText = displayName;
+        document.getElementById('user-initials').innerText = app.currentUser.charAt(0).toUpperCase();
+        document.getElementById('profile-email').innerText = app.currentUser;
+        
+        if(app.data.orders.length > 0) app.checkVipStatus();
+        app.showToast("Erfolgreich eingeloggt 🚀");
+    },
+
+    // Diese alte Login-Funktion wird nicht mehr direkt aufgerufen,
+    // bleibt aber als Fallback/Hilfsfunktion, falls man manuell Status setzen will
+    login: async (email) => {
+        // Nicht mehr benötigt bei nativem Auth
     },
 
     logout: () => {
         sessionStorage.removeItem('userEmail');
-        auth.signOut(); 
-        location.reload();
+        auth.signOut().then(() => {
+            location.reload();
+        });
     },
 
     nav: (id) => {
@@ -176,7 +180,6 @@ const app = {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     },
 
-    // --- GEÄNDERT: Nutzt jetzt getVipList() ---
     checkVipStatus: () => {
         const vipUsers = app.getVipList();
         app.isVip = vipUsers.has(app.currentUser);
@@ -188,13 +191,11 @@ const app = {
         }
     },
 
-    // --- GEÄNDERT: Korrekte Feed Darstellung ---
     renderFeed: (filter = 'all') => {
         const container = document.getElementById('feed-container');
         container.innerHTML = '';
         const liked = JSON.parse(localStorage.getItem('cupid_likes')) || [];
         
-        // Echte VIPs holen
         const vipUsers = app.getVipList();
 
         let posts = (app.data.posts || []).filter(p => p.approved);
@@ -209,7 +210,6 @@ const app = {
 
         posts.forEach(post => {
             const isLiked = liked.includes(post.id);
-            // Prüfen ob der AUTOR ein VIP ist (nicht der Betrachter)
             const isVipPost = vipUsers.has(post.author);
 
             const vipClasses = isVipPost 
@@ -335,10 +335,8 @@ const app = {
         if (selectedBtn.dataset.type === 'dynamic') currentPrice = app.getDynamicPrice();
         else if (selectedBtn.dataset.type === 'fixed') currentPrice = parseFloat(selectedBtn.dataset.price);
         
-        // Preis speichern für VIP-Check
         const basePrice = currentPrice;
         
-        // Wenn VIP, Rabatt für Anzeige (Datenbank speichert Originalwert + VIP Flag)
         if (app.isVip && currentPrice > 0) currentPrice *= 0.85;
 
         const submitBtn = document.querySelector('#order-form button[type="submit"]');
@@ -366,7 +364,7 @@ const app = {
                 sender: app.currentUser,
                 status: 'Bestellt', 
                 isVip: app.isVip, 
-                priceAtOrder: basePrice, // Originalpreis speichern!
+                priceAtOrder: basePrice, 
                 timestamp: Date.now(),
                 vipImage: imageUrl
             };
@@ -560,7 +558,6 @@ const app = {
         else docRef.delete().catch(err => alert(err));
     },
 
-    // --- PROGRESS BAR LOGIK ---
     updateStats: () => {
         const total = (app.data.orders || []).length;
         document.getElementById('total-count-big').innerText = total;
