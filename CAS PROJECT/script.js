@@ -28,6 +28,7 @@ const app = {
     html5QrCode: null,
     activeOrderId: null,
     isVip: false,
+    listenersStarted: false, // Verhindert doppeltes Laden
 
     init: async () => {
         // Prüfen, ob User bereits eingeloggt ist (Persistenz)
@@ -35,27 +36,38 @@ const app = {
             if (user) {
                 // User ist eingeloggt
                 app.handleLoginSuccess(user);
+                // WICHTIG: Datenbank erst verbinden, wenn Login bestätigt ist!
+                app.startDatabaseListeners();
             } else {
                 // Kein User -> Login Screen zeigen
                 document.getElementById('auth-overlay').classList.remove('hidden');
             }
         });
 
-        // Admin Session Check (Optional, falls du manuelle Admin-Logins nutzt)
+        // Admin Session Check
         const adminUser = sessionStorage.getItem('adminUser');
         if(adminUser) console.log("Admin Session aktiv");
 
         app.updateCountdown();
         setInterval(app.updateCountdown, 1000);
         app.setVibe('classic');
+    },
 
-        // Firestore Listener
+    // --- NEUE FUNKTION: Startet die Datenbank-Verbindung erst NACH Login ---
+    startDatabaseListeners: () => {
+        if (app.listenersStarted) return; // Nur einmal starten
+        app.listenersStarted = true;
+
+        console.log("Starte Datenbank-Verbindungen...");
+
+        // Firestore Listener: Posts (Hype Wall)
         db.collection("posts").orderBy("timestamp", "desc").onSnapshot(snapshot => {
             app.data.posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             app.renderFeed();
             app.renderModQueue(); 
         }, err => console.log("Post-Fehler:", err));
 
+        // Firestore Listener: Bestellungen
         db.collection("orders").onSnapshot(snapshot => {
             app.data.orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             app.updateStats(); 
@@ -63,6 +75,7 @@ const app = {
             app.renderOrders(); 
         }, err => console.log("Order-Fehler:", err));
         
+        // Realtime Database: Online-Status
         app.initPresence();
     },
 
@@ -87,7 +100,7 @@ const app = {
         });
     },
 
-    // --- NEUE HILFSFUNKTION: VIP STATUS BERECHNEN ---
+    // --- VIP STATUS BERECHNEN ---
     getVipList: () => {
         const paidOrders = (app.data.orders || []).filter(o => {
             const isPaidProduct = ['Keks', 'Rose', 'Full Combo'].includes(o.product);
@@ -98,7 +111,7 @@ const app = {
         return new Set(sorted.slice(0, 100).map(o => o.sender));
     },
 
-    // --- NEUER LOGIN PROZESS (NATIVE FIREBASE AUTH) ---
+    // --- LOGIN PROZESS (NATIVE FIREBASE AUTH) ---
     loginWithMicrosoft: async () => {
         const provider = new firebase.auth.OAuthProvider('microsoft.com');
 
@@ -155,11 +168,8 @@ const app = {
         app.showToast("Erfolgreich eingeloggt 🚀");
     },
 
-    // Diese alte Login-Funktion wird nicht mehr direkt aufgerufen,
-    // bleibt aber als Fallback/Hilfsfunktion, falls man manuell Status setzen will
-    login: async (email) => {
-        // Nicht mehr benötigt bei nativem Auth
-    },
+    // Diese alte Login-Funktion wird nicht mehr direkt aufgerufen
+    login: async (email) => { },
 
     logout: () => {
         sessionStorage.removeItem('userEmail');
