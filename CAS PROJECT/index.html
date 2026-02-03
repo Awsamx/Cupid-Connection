@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="de" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cupid Connection</title>
+    
+    <script src="https://alcdn.msauth.net/browser/2.35.0/js/msal-browser.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-analytics-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="style.css">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['"Plus Jakarta Sans"', 'sans-serif'] },
+                    colors: {
+                        brand: {
+                            dark: '#030014', 
+                            card: '#0f0720', 
+                            primary: '#7c3aed', 
+                            secondary: '#db2777', 
+                            accent: '#2dd4bf',
+                            surface: 'rgba(255, 255, 255, 0.03)'
+                        }
+                    },
+                    animation: {
+                        'blob': 'blob 7s infinite',
+                        'fade-in-up': 'fadeInUp 0.5s ease-out forwards',
+                        'bounce-short': 'bounceShort 0.4s ease-in-out',
+                        'spin-slow': 'spin 3s linear infinite',
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                    },
+                    keyframes: {
+                        blob: {
+                            '0%': { transform: 'translate(0px, 0px) scale(1)' },
+                            '33%': { transform: 'translate(30px, -50px) scale(1.1)' },
+                            '66%': { transform: 'translate(-20px, 20px) scale(0.9)' },
+                            '100%': { transform: 'translate(0px, 0px) scale(1)' },
+                        },
+                        fadeInUp: {
+                            '0%': { opacity: '0', transform: 'translateY(20px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' }
+                        },
+                        bounceShort: {
+                            '0%, 100%': { transform: 'scale(1)' },
+                            '50%': { transform: 'scale(1.2)' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="pb-28 md:pb-0 antialiased selection:bg-brand-secondary selection:text-white">
+
+    <div class="ambient-light">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+
+    <div id="auth-overlay" class="fixed inset-0 z-[60] bg-[#030014]/95 backdrop-blur-3xl flex items-center justify-center p-6 text-center">
+        <div class="max-w-md w-full glass-card p-10 rounded-[2.5rem] relative overflow-hidden">
+            <div class="absolute -top-10 -right-10 w-32 h-32 bg-brand-primary/20 rounded-full blur-xl animate-pulse-slow"></div>
+            
+            <h1 class="text-4xl font-extrabold mb-2 tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-500">Cupid Connection</h1>
+            <p class="text-gray-400 mb-8 font-medium">Authentifizierung erforderlich</p>
+            
+            <div id="login-container">
+                <button onclick="app.loginWithMicrosoft()" class="w-full bg-[#2f2f2f] hover:bg-black text-white py-4 rounded-2xl font-bold text-lg flex items-center justify-center gap-3 transition border border-white/10 shadow-xl group">
+                    <i class="fa-brands fa-microsoft text-2xl group-hover:scale-110 transition"></i>
+                    Microsoft Schul-Login
+                </button>
+                <p class="mt-6 text-[10px] text-gray-500 uppercase tracking-widest font-mono">Verifiziert für @europagym.at</p>
+            </div>
+            
+            <div id="auth-loading" class="hidden flex flex-col items-center py-10">
+                <i class="fa-solid fa-circle-notch fa-spin text-3xl text-brand-primary mb-4"></i>
+                <p class="text-xs text-gray-400 uppercase font-mono">Verbindung zu Microsoft...</p>
+            </div>
+        </div>
+    </div>
+
+    <header id="safety-banner" class="hidden fixed top-0 w-full z-40 bg-[#030014]/80 backdrop-blur-md border-b border-white/5 h-14">
+        <div class="max-w-6xl mx-auto px-6 h-full flex justify-between items-center">
+            <button onclick="app.nav('profile')" class="flex items-center space-x-3 group">
+                <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-brand-primary to-brand-secondary p-[1px]">
+                    <div class="w-full h-full rounded-full bg-black flex items-center justify-center text-[10px] font-bold text-white uppercase" id="user-initials">?</div>
+                </div>
+                <span id="current-user" class="text-sm font-semibold text-gray-300 group-hover:text-brand-accent transition">user</span>
+            </button>
+            <button onclick="app.logout()" class="text-gray-500 hover:text-red-400 transition text-xs font-bold uppercase tracking-widest">Logout</button>
+        </div>
+    </header>
+
+    <nav class="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-sm z-40">
+        <div class="glass-card rounded-[2rem] px-2 py-2 flex justify-around items-center shadow-2xl bg-[#0f0720]/90">
+            <button onclick="app.nav('home')" id="nav-home" class="p-4 text-gray-500 rounded-2xl transition hover:text-white"><i class="fa-solid fa-house text-lg"></i></button>
+            <button onclick="app.nav('wall')" id="nav-wall" class="p-4 text-gray-500 rounded-2xl transition hover:text-white"><i class="fa-solid fa-bolt text-lg"></i></button>
+            <button onclick="app.nav('order')" id="nav-order" class="w-14 h-14 rounded-full btn-gradient flex items-center justify-center shadow-lg border-4 border-[#030014] transform active:scale-95 transition -mt-8"><i class="fa-solid fa-paper-plane text-xl"></i></button>
+            <button onclick="app.nav('profile')" id="nav-profile" class="p-4 text-gray-500 rounded-2xl transition hover:text-white"><i class="fa-solid fa-user text-lg"></i></button>
+            <button onclick="app.checkAdminAccess()" id="nav-admin" class="p-4 text-gray-500 rounded-2xl transition hover:text-white"><i class="fa-solid fa-shield-halved text-lg"></i></button>
+        </div>
+    </nav>
+
+    <main class="max-w-4xl mx-auto pt-24 px-6 min-h-screen pb-32">
+
+        <section id="home" class="page-section active">
+            <div class="text-center mb-16 relative">
+                <span class="inline-block py-1 px-3 rounded-full bg-brand-primary/10 border border-brand-primary/20 text-brand-primary text-xs font-bold uppercase tracking-wider mb-4 animate-fade-in-up">Valentines Event 2026</span>
+                <h2 class="text-5xl md:text-7xl font-extrabold mb-6 tracking-tight leading-tight animate-fade-in-up" style="animation-delay: 0.1s">
+                    Verbinde dich <br>
+                    <span class="text-transparent bg-clip-text bg-gradient-to-r from-brand-primary via-brand-secondary to-brand-accent">Digital & Echt</span>
+                </h2>
+                
+                <div class="grid grid-cols-4 gap-2 md:gap-4 max-w-lg mx-auto mb-10 animate-fade-in-up" style="animation-delay: 0.2s">
+                    <div class="glass-card p-3 rounded-xl text-center"><div id="days" class="text-2xl md:text-3xl font-bold">00</div><div class="text-[10px] text-gray-500 uppercase font-bold">Tage</div></div>
+                    <div class="glass-card p-3 rounded-xl text-center"><div id="hours" class="text-2xl md:text-3xl font-bold">00</div><div class="text-[10px] text-gray-500 uppercase font-bold">Std</div></div>
+                    <div class="glass-card p-3 rounded-xl text-center"><div id="minutes" class="text-2xl md:text-3xl font-bold">00</div><div class="text-[10px] text-gray-500 uppercase font-bold">Min</div></div>
+                    <div class="glass-card p-3 rounded-xl text-center"><div id="seconds" class="text-2xl md:text-3xl font-bold">00</div><div class="text-[10px] text-gray-500 uppercase font-bold">Sek</div></div>
+                </div>
+            </div>
+
+            <div class="glass-card p-8 rounded-[2.5rem] relative overflow-hidden group mb-6">
+                <div class="absolute top-0 right-0 w-32 h-32 bg-brand-secondary/10 rounded-full blur-2xl group-hover:bg-brand-secondary/20 transition duration-500"></div>
+                
+                <div class="flex justify-between items-end mb-6 relative z-10">
+                    <div>
+                        <h3 class="text-2xl font-bold">Community Preisbremse</h3>
+                        <p class="text-sm text-gray-400 mt-1">Sammelt Bestellungen, um die "Alles Drin"-Kombi für alle billiger zu machen!</p>
+                    </div>
+                    <div class="text-right">
+                         <div id="total-count-big" class="text-3xl font-black text-brand-accent">0</div>
+                         <div class="text-[10px] text-gray-500 uppercase font-bold tracking-widest">Bestellungen</div>
+                    </div>
+                </div>
+
+                <div class="relative w-full h-12 bg-black/40 rounded-full mb-8 border border-white/5">
+                    <div id="progress-bar" class="absolute top-0 left-0 h-full bg-gradient-to-r from-brand-primary via-brand-secondary to-brand-accent rounded-full transition-all duration-1000 shadow-[0_0_20px_rgba(124,58,237,0.4)]" style="width: 0%"></div>
+                    
+                    <div class="absolute top-0 left-0 w-full h-full flex justify-between px-4 items-center text-[10px] font-bold text-white/50 z-10 pointer-events-none">
+                        <div class="flex flex-col items-center" style="margin-left: 20%">
+                            <div class="h-full w-[1px] bg-white/10 absolute top-0"></div>
+                            <span class="mt-14">100</span>
+                            <span class="text-brand-accent">-0,50€</span>
+                        </div>
+                        <div class="flex flex-col items-center" style="margin-left: 0%">
+                            <div class="h-full w-[1px] bg-white/10 absolute top-0"></div>
+                            <span class="mt-14">200</span>
+                            <span class="text-brand-accent">-1,00€</span>
+                        </div>
+                        <div class="flex flex-col items-center" style="margin-right: 0%">
+                            <div class="h-full w-[1px] bg-white/10 absolute top-0"></div>
+                            <span class="mt-14">300</span>
+                            <span class="text-brand-accent">-1,50€</span>
+                        </div>
+                        <div class="flex flex-col items-center" style="margin-right: 0%">
+                            <div class="h-full w-[1px] bg-white/10 absolute top-0"></div>
+                            <span class="mt-14">400</span>
+                            <span class="text-brand-accent">-2,00€</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-4">
+                <button onclick="app.nav('order')" class="w-full btn-gradient rounded-[2.5rem] p-6 flex flex-col justify-center items-center group transition hover:scale-[1.02] shadow-xl">
+                    <div class="bg-white/20 w-16 h-16 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition">
+                        <i class="fa-solid fa-paper-plane text-2xl"></i>
+                    </div>
+                    <span class="text-2xl font-bold">Jetzt Bestellen</span>
+                    <span class="text-white/80 text-sm">Brief, Keks oder Rose auswählen &rarr;</span>
+                </button>
+            </div>
+        </section>
+
+        <section id="wall" class="page-section">
+            <div class="flex justify-between items-end mb-10 mt-4">
+                <div>
+                    <h2 class="text-4xl font-extrabold tracking-tight">Hype Wall</h2>
+                    <p class="text-gray-500 text-sm">Gute Vibes only. Anonym & Sicher.</p>
+                </div>
+                <button onclick="document.getElementById('post-modal').classList.remove('hidden')" class="btn-glass bg-brand-primary/10 border-brand-primary/30 text-brand-primary hover:bg-brand-primary hover:text-white px-6 py-3 rounded-2xl font-bold transition flex items-center gap-2">
+                    <i class="fa-solid fa-pen-nib"></i> Verfassen
+                </button>
+            </div>
+
+            <div class="flex gap-2 mb-8 overflow-x-auto pb-2 scrollbar-none">
+                <button onclick="app.filterWall('all')" id="filter-all" class="px-5 py-2 rounded-full text-sm border border-white/10 hover:border-white/30 transition whitespace-nowrap active-filter">🔥 Trending</button>
+                <button onclick="app.filterWall('new')" id="filter-new" class="px-5 py-2 rounded-full text-sm border border-white/10 hover:border-white/30 transition whitespace-nowrap text-gray-400">⚡ Neueste</button>
+            </div>
+
+            <div id="feed-container" class="columns-1 md:columns-2 gap-4 space-y-4"></div>
+        </section>
+
+        <section id="order" class="page-section">
+            <div class="text-center mb-12">
+                <h2 class="text-3xl font-bold">Bestellung</h2>
+                <p class="text-gray-400">Versende ein Geschenk. <br>Der "Alles Drin"-Preis sinkt, wenn wir Meilensteine erreichen!</p>
+            </div>
+
+            <form id="order-form" onsubmit="event.preventDefault(); app.submitOrder();" class="max-w-xl mx-auto space-y-6">
+                <div class="glass-card p-8 rounded-[2rem] space-y-5">
+                    <h3 class="text-sm font-bold text-brand-primary uppercase tracking-widest mb-2">1. Empfänger</h3>
+                    <input type="text" id="order-recipient" placeholder="Vorname Nachname" class="w-full input-glass rounded-xl p-4 font-bold placeholder-gray-600" required>
+                    <div class="grid grid-cols-2 gap-4">
+                        <select id="order-grade" class="w-full input-glass rounded-xl p-4 appearance-none bg-black/50" required>
+                            <option value="">Stufe...</option>
+                            <option value="1">Klasse 1</option><option value="2">Klasse 2</option>
+                            <option value="3">Klasse 3</option><option value="4">Klasse 4</option>
+							<option value="4">Klasse 5</option><option value="5">Klasse 6</option>
+							<option value="7">Klasse 7</option><option value="8">Klasse 8</option>
+                            <option value="Lehrer">Lehrer</option>
+                        </select>
+                        <input type="text" id="order-room" placeholder="Raum (z.B. 7L)" class="input-glass rounded-xl p-4" required>
+                    </div>
+                </div>
+
+                <div class="glass-card p-8 rounded-[2rem] space-y-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-sm font-bold text-white uppercase tracking-widest">2. Wähle dein Item</h3>
+                        <div id="price-phase-badge" class="text-[10px] font-bold px-2 py-1 rounded bg-brand-primary/20 border border-brand-primary text-brand-primary uppercase animate-pulse">
+                            Lade Preise...
+                        </div>
+                    </div>
+
+                    <label class="flex items-center p-4 border border-white/5 rounded-2xl cursor-pointer hover:bg-white/5 transition bg-black/20" onclick="app.updateTotal()">
+                        <input type="radio" name="product" value="Brief" data-type="basic" class="mr-4 accent-brand-primary" checked>
+                        <div class="flex-1 font-bold">Nur Brief <span class="text-xs font-normal opacity-50 block"></span></div>
+                        <div class="text-sm font-mono opacity-50">Gratis</div>
+                    </label>
+
+                    <label class="flex items-center p-4 border border-white/5 rounded-2xl cursor-pointer hover:bg-white/5 transition bg-black/20" onclick="app.updateTotal()">
+                        <input type="radio" name="product" value="Keks" data-type="fixed" data-price="2.00" class="mr-4 accent-brand-primary">
+                        <div class="flex-1 font-bold">Keks Combo <span class="text-xs font-normal opacity-50 block">Brief + Bio Schoko-Keks</span></div>
+                        <div class="text-sm font-mono text-brand-primary">2,00€</div>
+                    </label>
+
+                    <label class="flex items-center p-4 border border-white/5 rounded-2xl cursor-pointer hover:bg-white/5 transition bg-black/20" onclick="app.updateTotal()">
+                        <input type="radio" name="product" value="Rose" data-type="fixed" data-price="3.00" class="mr-4 accent-brand-primary">
+                        <div class="flex-1 font-bold">Rosen Combo <span class="text-xs font-normal opacity-50 block">Brief + Echte Rote Rose</span></div>
+                        <div class="text-sm font-mono text-brand-primary">3,00€</div>
+                    </label>
+
+                    <label class="flex items-center p-4 border border-brand-secondary/30 rounded-2xl cursor-pointer hover:bg-brand-secondary/10 transition bg-gradient-to-r from-brand-secondary/10 to-transparent relative overflow-hidden" onclick="app.updateTotal()">
+                        <div class="absolute top-0 right-0 bg-brand-secondary text-[9px] font-bold px-2 py-0.5 rounded-bl-lg text-white">BESTSELLER</div>
+                        <input type="radio" name="product" value="Full Combo" data-type="dynamic" class="mr-4 accent-brand-secondary">
+                        <div class="flex-1 font-bold text-white">Alles Drin <span class="text-xs font-normal text-gray-400 block">Brief + Rose + Keks + VIP Chance</span></div>
+                        <div class="text-sm font-mono text-brand-secondary font-bold" id="dynamic-combo-price">4,00€</div>
+                    </label>
+                </div>
+
+                <div class="glass-card p-8 rounded-[2rem] space-y-4">
+                    <h3 class="text-sm font-bold text-brand-secondary uppercase tracking-widest mb-2">3. Nachricht</h3>
+                    <div class="mb-4">
+                        <div class="flex gap-3">
+                            <button type="button" onclick="app.setVibe('classic')" class="vibe-btn flex-1 py-3 text-xs font-bold border border-brand-accent bg-brand-accent/10 text-brand-accent rounded-xl transition" data-vibe="classic">Klassisch</button>
+                            <button type="button" onclick="app.setVibe('modern')" class="vibe-btn flex-1 py-3 text-xs font-bold border border-white/10 text-gray-400 rounded-xl hover:bg-white/5 transition" data-vibe="modern">Minimal</button>
+                            <button type="button" onclick="app.setVibe('meme')" class="vibe-btn flex-1 py-3 text-xs font-bold border border-white/10 text-gray-400 rounded-xl hover:bg-white/5 transition" data-vibe="meme">Meme</button>
+                        </div>
+                        <input type="hidden" id="order-vibe" value="classic">
+                    </div>
+                    <textarea id="order-message" rows="4" placeholder="Schreibe etwas Nettes... (Der QR Code öffnet diese Nachricht)" class="w-full input-glass rounded-xl p-4 resize-none" required></textarea>
+                </div>
+
+                <div class="glass-card p-8 rounded-[2rem] space-y-4 text-center">
+                    <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">Ablauf</h3>
+                    <div class="bg-brand-primary/10 border border-brand-primary/20 rounded-2xl p-4 text-sm text-gray-300 text-left">
+                        <ol class="list-decimal list-inside space-y-2">
+                            <li>Bestellung hier abschicken.</li>
+                            <li>QR-Code speichern/screenshotten.</li>
+                            <li>Zum Cupid-Stand kommen.</li>
+                            <li>Code zeigen und <b>bar bezahlen</b>.</li>
+                        </ol>
+                    </div>
+                    <div class="flex justify-between items-center py-2 px-2 mt-4">
+                        <span class="text-gray-400 font-bold uppercase text-xs">Zu zahlen</span>
+                        <span id="order-total" class="text-xl font-black text-brand-accent">0,00€</span>
+                    </div>
+                    <button type="submit" class="w-full btn-gradient py-4 rounded-xl shadow-xl font-bold">Bestellen & Code generieren</button>
+                </div>
+            </form>
+        </section>
+
+        <section id="profile" class="page-section">
+            <h2 class="text-3xl font-bold mb-6">Live Tracking</h2>
+            <div class="glass-card p-6 rounded-3xl mb-6 flex items-center gap-4">
+                <div class="bg-white/10 p-3 rounded-full"><i class="fa-solid fa-user text-xl"></i></div>
+                <div>
+                    <div class="text-xs text-gray-400 uppercase">Eingeloggt als</div>
+                    <div id="profile-email" class="font-bold text-brand-primary"></div>
+                </div>
+            </div>
+            <div id="my-orders-list" class="space-y-6"></div>
+        </section>
+
+        <section id="admin" class="page-section">
+            <div class="flex justify-between items-center mb-8">
+                <h2 class="text-3xl font-bold">Admin</h2>
+                <div class="flex gap-2 p-1 bg-white/5 rounded-xl">
+                    <button onclick="app.adminTab('mod')" id="t-mod" class="admin-tab-btn px-4 py-2 text-xs font-bold rounded-lg bg-white/10 text-white">Mod</button>
+                    <button onclick="app.adminTab('orders')" id="t-orders" class="admin-tab-btn px-4 py-2 text-xs font-bold rounded-lg text-gray-500">Scan</button>
+                </div>
+            </div>
+
+            <div id="admin-mod" class="admin-view space-y-4">
+                <div id="mod-queue" class="grid gap-4"></div>
+            </div>
+            
+            <div id="admin-orders" class="admin-view hidden space-y-6">
+                <div class="glass-card p-6 rounded-3xl border-brand-accent/20">
+                    <button onclick="app.startScanner()" class="w-full btn-gradient py-4 rounded-2xl flex items-center justify-center gap-3 shadow-lg">
+                        <i class="fa-solid fa-camera text-xl"></i> QR-Code Scannen
+                    </button>
+                    <div id="reader" class="hidden"></div>
+                </div>
+
+                <div id="active-order-view" class="hidden animate-fade-in-up">
+                    <div class="glass-card p-6 rounded-3xl border-brand-accent bg-brand-primary/5 shadow-[0_0_30px_rgba(45,212,191,0.1)]">
+                        <div class="flex justify-between items-start mb-4">
+                            <h3 class="text-xl font-bold text-brand-accent font-mono" id="det-id">...</h3>
+                            <button onclick="document.getElementById('active-order-view').classList.add('hidden')" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-xl"></i></button>
+                        </div>
+                        <div class="space-y-3 text-sm mb-6 p-4 bg-black/20 rounded-2xl">
+                            <p class="flex justify-between"><span>Empfänger:</span> <span id="det-recipient" class="font-bold text-white"></span></p>
+                            <p class="flex justify-between"><span>Raum:</span> <span id="det-room" class="font-bold text-white"></span></p>
+                            <p class="flex justify-between"><span>Item:</span> <span id="det-product" class="font-bold text-brand-secondary"></span></p>
+                            <p class="mt-2 text-gray-400 italic border-t border-white/5 pt-2">"<span id="det-message"></span>"</p>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-2">
+                            <button onclick="app.updateStatus('Bezahlt')" class="bg-blue-600 hover:bg-blue-500 py-3 rounded-xl text-[10px] font-bold uppercase transition">💰 Bezahlt</button>
+                            <button onclick="app.updateStatus('In Zubereitung')" class="bg-orange-600 hover:bg-orange-500 py-3 rounded-xl text-[10px] font-bold uppercase transition">🍪 Küche</button>
+                            <button onclick="app.updateStatus('In Zustellung')" class="bg-brand-primary hover:bg-brand-primary/80 py-3 rounded-xl text-[10px] font-bold uppercase col-span-2 transition">🚚 In Zustellung</button>
+                            <button onclick="app.updateStatus('Geliefert')" class="bg-green-600 hover:bg-green-500 py-3 rounded-xl text-[10px] font-bold uppercase col-span-2 transition">✅ Geliefert</button>
+                        </div>
+                    </div>
+                </div>
+
+                <h3 class="text-xs font-bold uppercase text-gray-500 mt-8 mb-2">Letzte Bestellungen</h3>
+                <div id="orders-list" class="space-y-3"></div>
+            </div>
+        </section>
+    </main>
+
+    <div id="post-modal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+        <div class="w-full max-w-md glass-card p-8 rounded-3xl relative">
+            <button onclick="document.getElementById('post-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-500"><i class="fa-solid fa-xmark text-xl"></i></button>
+            <h3 class="text-xl font-bold mb-4">Was gibt's Neues?</h3>
+            <textarea id="new-post-content" rows="4" class="w-full input-glass rounded-xl p-4 text-white mb-4 resize-none" placeholder="Schreibe etwas..."></textarea>
+            <button onclick="app.submitPost()" class="w-full btn-gradient py-3 rounded-xl font-bold">Senden</button>
+        </div>
+    </div>
+
+    <div id="admin-auth-modal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+        <div class="max-w-sm w-full glass-card p-8 rounded-2xl relative">
+            <button onclick="document.getElementById('admin-auth-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-500"><i class="fa-solid fa-xmark"></i></button>
+            <h2 class="text-xl font-bold text-center mb-6">Administrator</h2>
+            <form onsubmit="event.preventDefault(); app.adminLogin();">
+                <div class="mb-4 space-y-3">
+                    <input type="text" id="admin-user" placeholder="Admin E-Mail" class="w-full input-glass rounded-lg p-3">
+                    <input type="password" id="admin-pass" placeholder="Pass" class="w-full input-glass rounded-lg p-3">
+                </div>
+                <button type="submit" class="w-full btn-glass bg-white/10 py-3 rounded-lg font-bold">Login</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="qr-modal" class="hidden fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 backdrop-blur-md">
+        <div class="w-full max-w-sm glass-card p-8 rounded-[2.5rem] text-center relative border border-brand-accent/30 shadow-2xl">
+            <button onclick="document.getElementById('qr-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400"><i class="fa-solid fa-xmark"></i></button>
+            <div class="text-brand-accent mb-2"><i class="fa-solid fa-circle-check text-4xl"></i></div>
+            <h3 class="text-2xl font-bold mb-1">Bestellung erfasst</h3>
+            <p class="text-xs text-gray-400 mb-6">Zeige diesen Code unserem Team zum Bezahlen.</p>
+            <div class="bg-white p-4 rounded-2xl inline-block mb-4 shadow-lg">
+                <img id="qr-image" src="" alt="Order QR" class="w-48 h-48 object-contain mix-blend-multiply">
+            </div>
+            <p class="font-mono text-brand-accent text-sm mb-4" id="qr-order-id">...</p>
+            <div id="qr-summary" class="text-left bg-white/5 p-4 rounded-xl border border-white/10 text-xs space-y-1 mb-4"></div>
+            <button onclick="document.getElementById('qr-modal').classList.add('hidden')" class="w-full btn-glass py-3 rounded-xl font-bold">Schließen</button>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed top-24 right-6 glass-card px-6 py-4 rounded-2xl shadow-2xl transform translate-x-[150%] transition duration-500 z-[70] flex items-center gap-4 border-l-4 border-l-brand-accent">
+        <div class="bg-brand-accent/20 p-2 rounded-full text-brand-accent"><i class="fa-solid fa-check"></i></div>
+        <span id="toast-msg" class="font-bold text-sm">Aktion ausgeführt</span>
+    </div>
+
+    <script src="script.js" defer></script>
+</body>
+</html>
