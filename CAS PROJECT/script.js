@@ -43,26 +43,34 @@ const app = {
         document.getElementById('auth-loading').classList.remove('hidden');
         document.getElementById('login-container').classList.add('hidden');
 
-        // WICHTIG: Redirect-Result abfangen (für Instagram-Nutzer)
+        // 1. PERSISTENCE SOFORT SETZEN (Wichtig für Instagram & Safari)
+        try {
+            await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+        } catch(e) { console.error("Persistence Warning:", e); }
+
+        // 2. REDIRECT RESULT PRÜFEN (Für Instagram Rückkehr)
         try {
             const result = await auth.getRedirectResult();
             if (result.user) {
-                console.log("Login via Redirect erfolgreich");
-                // Kein handleLoginSuccess hier nötig, onAuthStateChanged feuert gleich
+                console.log("Redirect Login erfolgreich");
+                // Wir lassen onAuthStateChanged den Rest machen
             }
         } catch (error) {
             console.error("Redirect Check Fehler:", error);
         }
 
-        // Auth-Status überwachen
+        // 3. AUTH STATUS ÜBERWACHEN
         auth.onAuthStateChanged((user) => {
             if (user) {
                 app.handleLoginSuccess(user);
-                app.startDatabaseListeners();
+                if (!app.listenersStarted) {
+                    app.startDatabaseListeners();
+                }
             } else {
                 document.getElementById('auth-overlay').classList.remove('hidden');
                 document.getElementById('auth-loading').classList.add('hidden');
                 document.getElementById('login-container').classList.remove('hidden');
+                app.listenersStarted = false;
             }
         });
 
@@ -71,7 +79,7 @@ const app = {
         app.setVibe('classic');
     },
 
-    // --- NEUE HYBRID-LOGIN FUNKTION ---
+    // --- HYBRID LOGIN 2.0 (Optimiert für Popup-Blocker) ---
     loginWithMicrosoft: async () => {
         const provider = new firebase.auth.OAuthProvider('microsoft.com');
         provider.setCustomParameters({
@@ -79,24 +87,25 @@ const app = {
             tenant: 'f7bb63a9-5ed7-4a21-b43a-3f684ec4938b' 
         });
 
-        // Browser-Erkennung: Ist es ein In-App Browser (Instagram, TikTok etc.)?
+        // Browser-Erkennung
         const ua = navigator.userAgent || navigator.vendor || window.opera;
         const isInApp = (ua.indexOf("Instagram") > -1) || (ua.indexOf("FBAN") > -1) || (ua.indexOf("FBAV") > -1) || (ua.indexOf("TikTok") > -1);
 
         try {
+            // UI sofort umschalten, damit User Feedback hat
             document.getElementById('login-container').classList.add('hidden');
             document.getElementById('auth-loading').classList.remove('hidden');
 
-            // Immer Local Persistence setzen
-            await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-
             if (isInApp) {
-                // FALL A: Instagram/TikTok -> MUSS Redirect nutzen (Popups geblockt)
-                console.log("In-App Browser erkannt: Nutze Redirect");
+                // FALL A: Instagram/TikTok -> REDIRECT
+                // Hier ist keine User-Interaktion nötig, Redirect darf dauern
+                console.log("In-App Browser: Starte Redirect...");
                 await auth.signInWithRedirect(provider);
             } else {
-                // FALL B: Safari/Chrome/Normal -> Nutze Popup (Vermeidet Safari POST-Fehler)
-                console.log("Standard Browser erkannt: Nutze Popup");
+                // FALL B: Safari/Chrome -> POPUP
+                // WICHTIG: Hier darf KEIN 'await' davor stehen, sonst blockt Safari das Popup!
+                // Persistence wurde schon in init() gesetzt.
+                console.log("Standard Browser: Öffne Popup...");
                 await auth.signInWithPopup(provider);
             }
 
@@ -104,14 +113,14 @@ const app = {
             console.error("Login Fehler:", error);
             
             if (error.code === 'auth/popup-closed-by-user') {
-                alert("Login abgebrochen. Bitte erneut versuchen.");
+                alert("Login abgebrochen. Bitte erneut klicken.");
             } else if (error.code === 'auth/popup-blocked') {
-                alert("Popup blockiert. Bitte erlaube Popups für diese Seite.");
+                alert("Popup wurde blockiert. Bitte klicke auf 'Erlauben' oder öffne die Seite in Safari/Chrome.");
             } else {
                 alert("Login Fehler: " + error.message);
             }
 
-            // UI Reset
+            // UI Reset bei Fehler
             document.getElementById('login-container').classList.remove('hidden');
             document.getElementById('auth-loading').classList.add('hidden');
         }
@@ -133,7 +142,10 @@ const app = {
         document.getElementById('safety-banner').classList.remove('hidden');
         
         let displayName = user.displayName || email.split('@')[0];
-        if (email === 'admin@europagym.at') displayName = "Admin";
+        if (email === 'admin@europagym.at') {
+            displayName = "Admin";
+            app.nav('admin');
+        }
 
         document.getElementById('current-user').innerText = displayName;
         document.getElementById('user-initials').innerText = displayName.charAt(0).toUpperCase();
@@ -142,7 +154,6 @@ const app = {
         if(!app.listenersStarted) app.showToast("Erfolgreich eingeloggt 🚀");
     },
 
-    // --- RESTLICHER CODE UNVERÄNDERT ---
     startDatabaseListeners: () => {
         if (app.listenersStarted) return;
         app.listenersStarted = true;
@@ -150,7 +161,7 @@ const app = {
         db.collection("posts").orderBy("timestamp", "desc").onSnapshot(snapshot => {
             app.data.posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             app.renderFeed();
-            app.renderModQueue(); 
+            if(app.currentUser === 'admin@europagym.at') app.renderModQueue(); 
         });
 
         let ordersQuery = db.collection("orders");
@@ -186,10 +197,7 @@ const app = {
                 const myId = app.currentUser.replace(/\./g, '_').replace(/@/g, '_');
                 const userStatusRef = rtdb.ref('/presence/' + myId);
                 userStatusRef.onDisconnect().remove();
-                userStatusRef.set({
-                    email: app.currentUser,
-                    last_seen: firebase.database.ServerValue.TIMESTAMP
-                });
+                userStatusRef.set({ email: app.currentUser, last_seen: firebase.database.ServerValue.TIMESTAMP });
             }
         });
         rtdb.ref('/presence').on('value', (snapshot) => {
@@ -224,19 +232,19 @@ const app = {
         const bar = document.getElementById('progress-bar');
         
         if (total < 100) {
-            bar.classList.add('is-gold'); 
+            if(bar) bar.classList.add('is-gold');
             if(bigCount) {
                 bigCount.classList.add('gold-text-effect');
                 bigCount.classList.remove('text-brand-accent');
             }
         } else {
-            bar.classList.remove('is-gold');
+            if(bar) bar.classList.remove('is-gold');
             if(bigCount) {
                 bigCount.classList.remove('gold-text-effect');
                 bigCount.classList.add('text-brand-accent');
             }
         }
-        bar.style.width = percentage + '%';
+        if(bar) bar.style.width = percentage + '%';
         app.updateTotal(); 
     },
 
@@ -266,12 +274,10 @@ const app = {
         const email = document.getElementById('admin-user').value;
         const pass = document.getElementById('admin-pass').value;
         try {
-            if (auth.currentUser) await auth.signOut();
             await auth.signInWithEmailAndPassword(email, pass);
-            sessionStorage.setItem('adminUser', email);
+            // Kein manueller Redirect hier, onAuthStateChanged erledigt das
             document.getElementById('admin-auth-modal').classList.add('hidden');
-            app.nav('admin');
-            if (app.currentUser !== email) location.reload(); 
+            setTimeout(() => location.reload(), 500); 
         } catch (error) {
             alert("Login fehlgeschlagen: " + error.message);
         }
@@ -389,13 +395,23 @@ const app = {
 
     renderFeed: (filter = 'all') => {
         const container = document.getElementById('feed-container');
+        if (!container) return;
         container.innerHTML = '';
-        const liked = JSON.parse(localStorage.getItem('cupid_likes')) || [];
+        
+        let liked = [];
+        try { liked = JSON.parse(localStorage.getItem('cupid_likes')) || []; } catch(e) {}
+        
         const vipUsers = app.getVipList();
         let posts = (app.data.posts || []).filter(p => p.approved);
+        
         if(filter === 'new') posts.sort((a,b) => b.timestamp - a.timestamp);
         else posts.sort((a,b) => b.hearts - a.hearts); 
-        if (posts.length === 0) { container.innerHTML = '<p class="text-gray-500 col-span-full text-center py-10">Keine Posts.</p>'; return; }
+        
+        if (posts.length === 0) { 
+            container.innerHTML = '<p class="text-gray-500 col-span-full text-center py-10">Keine Posts.</p>'; 
+            return; 
+        }
+        
         posts.forEach(post => {
             const isLiked = liked.includes(post.id);
             const isVipPost = vipUsers.has(post.author); 
@@ -409,7 +425,7 @@ const app = {
                     <div class="flex justify-between items-center pt-3 border-t border-white/5">
                         ${verifyLabel}
                         <button onclick="app.heartPost('${post.id}')" class="flex items-center gap-2 ${isLiked ? 'heart-liked' : 'text-gray-500'} transition">
-                            <i class="fa-solid fa-heart"></i> <span class="text-xs font-bold">${post.hearts}</span>
+                            <i class="fa-solid fa-heart"></i> <span class="text-xs font-bold">${post.hearts || 0}</span>
                         </button>
                     </div>
                 </div>`;
@@ -494,6 +510,7 @@ const app = {
 
     renderModQueue: () => {
         const q = document.getElementById('mod-queue');
+        if (!q) return;
         const pending = (app.data.posts || []).filter(p => !p.approved);
         q.innerHTML = pending.length ? pending.map(p => `
             <div class="glass-card p-4 rounded-2xl flex justify-between items-center bg-black/40">
