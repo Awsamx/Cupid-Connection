@@ -40,35 +40,13 @@ const app = {
     },
 
     init: async () => {
-        // UI-Status: Erstmal Lade-Spinner zeigen, bis wir wissen was los ist
-        document.getElementById('login-container').classList.add('hidden');
-        document.getElementById('auth-loading').classList.remove('hidden');
-        document.getElementById('auth-overlay').classList.remove('hidden');
-
-        // Login-Session dauerhaft speichern (Wichtig für Safari!)
-        await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-
-        // 1. Check: Kommen wir gerade von Microsoft zurück?
-        try {
-            await auth.getRedirectResult();
-            // Wir müssen hier nichts tun, onAuthStateChanged feuert gleich automatisch
-        } catch (error) {
-            console.error("Redirect Fehler:", error);
-            if (error.code !== 'auth/popup-closed-by-user') {
-                alert("Login fehlgeschlagen: " + error.message);
-            }
-        }
-
-        // 2. Genereller Auth-Check (feuert bei Page Load UND nach Redirect)
         auth.onAuthStateChanged((user) => {
             if (user) {
-                // User ist da -> App starten
                 app.handleLoginSuccess(user);
+                // Datenbank erst starten, wenn wir wissen, WER eingeloggt ist
                 app.startDatabaseListeners();
             } else {
-                // Kein User -> Login Button zeigen
-                document.getElementById('auth-loading').classList.add('hidden');
-                document.getElementById('login-container').classList.remove('hidden');
+                document.getElementById('auth-overlay').classList.remove('hidden');
             }
         });
 
@@ -83,16 +61,17 @@ const app = {
 
         console.log("Starte Datenbank für:", app.currentUser);
 
-        // 1. Hype Wall
+        // 1. Hype Wall (Jeder sieht alles)
         db.collection("posts").orderBy("timestamp", "desc").onSnapshot(snapshot => {
             app.data.posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             app.renderFeed();
             app.renderModQueue(); 
         });
 
-        // 2. Orders
+        // 2. INTELLIGENTE BESTELL-LISTE (Der wichtigste Fix!)
         let ordersQuery = db.collection("orders");
 
+        // Wenn NICHT Admin, filtere nur eigene Bestellungen
         if (app.currentUser !== 'admin@europagym.at') {
             ordersQuery = ordersQuery.where("sender", "==", app.currentUser);
         } else {
@@ -102,20 +81,23 @@ const app = {
         ordersQuery.onSnapshot(snapshot => {
             app.data.orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             
+            // Wenn Admin, sortiere nach Zeit (neueste oben)
             if (app.currentUser === 'admin@europagym.at') {
                 app.data.orders.sort((a,b) => b.timestamp - a.timestamp);
-                app.renderOrders(); 
+                app.renderOrders(); // Admin Tabelle füllen
             }
             
+            // User-Ansicht auch aktualisieren
             app.renderMyOrders();
             app.checkVipStatus();
             
         }, error => {
             console.error("Fehler beim Laden der Bestellungen:", error);
+            // Falls Fehler, VIP Status trotzdem prüfen (dann halt false)
             app.checkVipStatus();
         });
 
-        // 3. Stats
+        // 3. STATS (Zähler)
         db.collection("metadata").doc("stats").onSnapshot(doc => {
             if (doc.exists) {
                 app.data.totalCount = doc.data().count || 0;
@@ -132,6 +114,7 @@ const app = {
         const onlineRef = rtdb.ref('.info/connected');
         onlineRef.on('value', (snapshot) => {
             if (snapshot.val() === true && app.currentUser) {
+                // Admin nicht in der Online-Liste anzeigen (optional, aber sauberer)
                 if (app.currentUser === 'admin@europagym.at') return;
 
                 const myId = app.currentUser.replace(/\./g, '_').replace(/@/g, '_');
@@ -157,33 +140,31 @@ const app = {
 
     loginWithMicrosoft: async () => {
         const provider = new firebase.auth.OAuthProvider('microsoft.com');
-        provider.setCustomParameters({
-            prompt: 'select_account',
-            tenant: 'f7bb63a9-5ed7-4a21-b43a-3f684ec4938b' 
-        });
-
+        provider.setCustomParameters({ prompt: 'select_account', tenant: 'f7bb63a9-5ed7-4a21-b43a-3f684ec4938b' });
         try {
             document.getElementById('login-container').classList.add('hidden');
             document.getElementById('auth-loading').classList.remove('hidden');
-
-            // Safari Fix: Redirect nutzen
-            await auth.signInWithRedirect(provider);
-            
+            const result = await auth.signInWithPopup(provider);
+            const user = result.user;
+            if (!user.email.toLowerCase().endsWith('@europagym.at')) {
+                await auth.signOut();
+                alert("Nur @europagym.at erlaubt.");
+                location.reload();
+            }
         } catch (error) {
-            console.error("Login Start Fehler:", error);
-            alert("Konnte Login nicht starten: " + error.message);
-            // Reset UI
-            document.getElementById('login-container').classList.remove('hidden');
-            document.getElementById('auth-loading').classList.add('hidden');
+            console.error(error);
+            alert("Login Fehler: " + error.message);
+            location.reload();
         }
     },
 
     handleLoginSuccess: (user) => {
+        // E-Mail immer in Kleinbuchstaben speichern, um Verwirrung zu vermeiden
         const email = user.email.toLowerCase();
         
+        // Prüfen ob Schule oder Admin
         if (!email.endsWith('@europagym.at') && email !== 'admin@europagym.at') { 
             auth.signOut(); 
-            alert("Nur @europagym.at Adressen erlaubt.");
             return; 
         }
         
@@ -193,6 +174,7 @@ const app = {
         document.getElementById('auth-overlay').classList.add('hidden');
         document.getElementById('safety-banner').classList.remove('hidden');
         
+        // Anzeige-Name
         let displayName = user.displayName || email.split('@')[0];
         if (email === 'admin@europagym.at') displayName = "Admin";
 
@@ -205,9 +187,7 @@ const app = {
 
     logout: () => {
         sessionStorage.removeItem('userEmail');
-        auth.signOut().then(() => {
-            window.location.reload();
-        });
+        auth.signOut().then(() => location.reload());
     },
 
     nav: (id) => {
@@ -223,6 +203,7 @@ const app = {
     },
 
     checkVipStatus: () => {
+        // Prüft lokal in den geladenen Daten
         const hasPaid = (app.data.orders || []).some(o => o.priceAtOrder > 0 && o.sender === app.currentUser);
         app.isVip = hasPaid;
 
@@ -239,6 +220,7 @@ const app = {
     },
 
     checkAdminAccess: () => {
+        // Immer Login fordern
         document.getElementById('admin-auth-modal').classList.remove('hidden');
         document.getElementById('admin-user').value = "admin@europagym.at";
         document.getElementById('admin-pass').value = "";
@@ -248,16 +230,20 @@ const app = {
         const email = document.getElementById('admin-user').value;
         const pass = document.getElementById('admin-pass').value;
         try {
+            // Erst ausloggen, um sauberen Status zu haben
             if (auth.currentUser) await auth.signOut();
             
+            // Dann als Admin einloggen
             await auth.signInWithEmailAndPassword(email, pass);
-            sessionStorage.setItem('adminUser', email);
+            // Hinweis: Der Page-Reload oder handleLoginSuccess wird durch onAuthStateChanged ausgelöst!
             
             document.getElementById('admin-auth-modal').classList.add('hidden');
             app.nav('admin');
             
+            // Wir müssen hier manuell neu laden, damit die Listener mit dem neuen User neu starten
+            // Das ist der sauberste Weg um von "User" zu "Admin" zu wechseln
             if (app.currentUser !== email) {
-                 window.location.reload(); 
+                 location.reload(); 
             }
 
         } catch (error) {
@@ -304,7 +290,6 @@ const app = {
         }
         bar.style.width = percentage + '%';
         
-        app.checkVipStatus(); 
         app.updateTotal(); 
     },
 
@@ -348,9 +333,11 @@ const app = {
 
             await db.collection("orders").doc(id).set(newOrder);
             
-            db.collection("metadata").doc("stats").set({
+            // --- FIX: Erstellt den Zähler, falls er noch nicht existiert ---
+            const statsRef = db.collection("metadata").doc("stats");
+            await statsRef.set({
                 count: firebase.firestore.FieldValue.increment(1)
-            }, { merge: true }).catch(e => console.log(e));
+            }, { merge: true });
 
             const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${id}&color=7c3aed&bgcolor=ffffff`;
             document.getElementById('qr-image').src = qrUrl;
@@ -464,7 +451,10 @@ const app = {
 
     renderMyOrders: () => {
         const list = document.getElementById('my-orders-list');
+        // Hier NUR die Daten nehmen, die in app.data.orders geladen wurden
+        // Da der Listener oben filtert, sind das für normale User automatisch nur die eigenen
         const mine = (app.data.orders || []).filter(o => o.sender === app.currentUser).sort((a,b) => b.timestamp - a.timestamp);
+        
         const steps = ['Bestellt', 'Bezahlt', 'In Zubereitung', 'In Zustellung', 'Geliefert'];
 
         list.innerHTML = mine.length ? mine.map(o => {
