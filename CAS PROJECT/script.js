@@ -187,7 +187,7 @@ const app = {
 
         // Elemente holen
         const indicator = document.getElementById('vip-indicator'); // Falls du das irgendwo anders hast
-        const headerBadge = document.getElementById('header-vip-badge'); // Das neue im Header
+        const headerBadge = document.getElementById('vip-badge-header');
 
         if (app.isVip) {
             if(indicator) indicator.classList.remove('hidden');
