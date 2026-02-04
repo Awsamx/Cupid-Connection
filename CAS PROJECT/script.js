@@ -21,14 +21,14 @@ try {
 
 // --- 3. APP LOGIK ---
 const app = {
-    data: { posts: [], orders: [], totalCount: 0 }, // Neu: totalCount separat
+    data: { posts: [], orders: [], totalCount: 0 },
     currentUser: null,
     html5QrCode: null,
     activeOrderId: null,
     isVip: false,
     listenersStarted: false,
 
-    // Fixe Preise
+    // Fixe Preisliste
     priceList: {
         "Brief": 0.00,
         "Brief + Keks": 1.00,
@@ -40,9 +40,26 @@ const app = {
     },
 
     init: async () => {
+        // --- NEU: REDIRECT RESULT HANDLING ---
+        // Prüft beim Laden der Seite, ob wir gerade vom Microsoft-Login zurückkommen
+        try {
+            const result = await auth.getRedirectResult();
+            if (result.user) {
+                // Erfolgreicher Login nach Redirect
+                app.handleLoginSuccess(result.user);
+            }
+        } catch (error) {
+            console.error("Redirect Login Fehler:", error);
+            if (error.code !== 'auth/popup-closed-by-user' && error.code !== 'auth/user-cancelled') {
+                alert("Login fehlgeschlagen: " + error.message);
+            }
+        }
+
+        // --- NORMALER AUTH STATUS CHECK ---
         auth.onAuthStateChanged((user) => {
             if (user) {
                 app.handleLoginSuccess(user);
+                // Datenbank erst starten, wenn wir wissen, WER eingeloggt ist
                 app.startDatabaseListeners();
             } else {
                 document.getElementById('auth-overlay').classList.remove('hidden');
@@ -57,32 +74,49 @@ const app = {
     startDatabaseListeners: () => {
         if (app.listenersStarted) return;
         app.listenersStarted = true;
-        console.log("Starte Listener...");
 
-        // 1. Hype Wall (Für alle sichtbar)
+        console.log("Starte Datenbank für:", app.currentUser);
+
+        // 1. Hype Wall
         db.collection("posts").orderBy("timestamp", "desc").onSnapshot(snapshot => {
             app.data.posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             app.renderFeed();
             app.renderModQueue(); 
         });
 
-        // 2. MEINE Bestellungen (Nur eigene laden -> Sicherheit!)
-        db.collection("orders").where("sender", "==", app.currentUser).onSnapshot(snapshot => {
-            // Speichere meine Bestellungen separat oder filtere sie
-            // Hier nutzen wir app.data.orders nur für "Meine Bestellungen" Ansicht
-            const myOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            app.data.orders = myOrders; // Achtung: Als normaler User sind das NUR meine
+        // 2. INTELLIGENTE BESTELL-LISTE
+        let ordersQuery = db.collection("orders");
+
+        if (app.currentUser !== 'admin@europagym.at') {
+            ordersQuery = ordersQuery.where("sender", "==", app.currentUser);
+        } else {
+            console.log("Admin erkannt: Lade ALLE Bestellungen...");
+        }
+
+        ordersQuery.onSnapshot(snapshot => {
+            app.data.orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            
+            if (app.currentUser === 'admin@europagym.at') {
+                app.data.orders.sort((a,b) => b.timestamp - a.timestamp);
+                app.renderOrders(); 
+            }
+            
             app.renderMyOrders();
+            app.checkVipStatus();
+            
+        }, error => {
+            console.error("Fehler beim Laden der Bestellungen:", error);
             app.checkVipStatus();
         });
 
-        // 3. GLOBALER ZÄHLER (Für Preisbremse)
-        // Liest aus metadata/stats statt alle Orders zu zählen
+        // 3. STATS
         db.collection("metadata").doc("stats").onSnapshot(doc => {
             if (doc.exists) {
                 app.data.totalCount = doc.data().count || 0;
-                app.updateStats();
+            } else {
+                app.data.totalCount = 0;
             }
+            app.updateStats();
         });
         
         app.initPresence();
@@ -92,6 +126,8 @@ const app = {
         const onlineRef = rtdb.ref('.info/connected');
         onlineRef.on('value', (snapshot) => {
             if (snapshot.val() === true && app.currentUser) {
+                if (app.currentUser === 'admin@europagym.at') return;
+
                 const myId = app.currentUser.replace(/\./g, '_').replace(/@/g, '_');
                 const userStatusRef = rtdb.ref('/presence/' + myId);
                 userStatusRef.onDisconnect().remove();
@@ -109,45 +145,59 @@ const app = {
     },
 
     getVipList: () => {
-        // Prüft lokal nur die eigenen Orders auf VIP
-        // (Für globale VIP-Anzeige im Feed müsste man separate Logik bauen, 
-        // aber für das eigene Badge reicht das hier)
         const paidOrders = (app.data.orders || []).filter(o => o.priceAtOrder > 0);
         return new Set(paidOrders.map(o => o.sender));
     },
 
+    // --- NEU: REDIRECT STATT POPUP ---
     loginWithMicrosoft: async () => {
         const provider = new firebase.auth.OAuthProvider('microsoft.com');
-        provider.setCustomParameters({ prompt: 'select_account', tenant: 'f7bb63a9-5ed7-4a21-b43a-3f684ec4938b' });
+        provider.setCustomParameters({
+            prompt: 'select_account',
+            tenant: 'f7bb63a9-5ed7-4a21-b43a-3f684ec4938b' 
+        });
+
         try {
             document.getElementById('login-container').classList.add('hidden');
             document.getElementById('auth-loading').classList.remove('hidden');
-            const result = await auth.signInWithPopup(provider);
-            const user = result.user;
-            if (!user.email.toLowerCase().endsWith('@europagym.at')) {
-                await auth.signOut();
-                alert("Nur @europagym.at erlaubt.");
-                location.reload();
-            }
+
+            // WICHTIG: signInWithRedirect statt signInWithPopup
+            // Safari/Mobile blockiert Popups oft, Redirect funktioniert immer.
+            await auth.signInWithRedirect(provider);
+            
+            // Der Code hier wird nicht mehr ausgeführt, da die Seite neu lädt.
+            // Die Logik geht in init() -> getRedirectResult() weiter.
+
         } catch (error) {
-            console.error(error);
-            alert("Login Fehler: " + error.message);
-            location.reload();
+            console.error("Login Start Fehler:", error);
+            alert("Konnte Login nicht starten: " + error.message);
+            // Reset UI falls Redirect fehlschlägt
+            document.getElementById('login-container').classList.remove('hidden');
+            document.getElementById('auth-loading').classList.add('hidden');
         }
     },
 
     handleLoginSuccess: (user) => {
-        if (!user.email.toLowerCase().endsWith('@europagym.at')) { auth.signOut(); return; }
-        app.currentUser = user.email.toLowerCase();
+        const email = user.email.toLowerCase();
+        
+        if (!email.endsWith('@europagym.at') && email !== 'admin@europagym.at') { 
+            auth.signOut(); 
+            alert("Nur @europagym.at Adressen erlaubt.");
+            return; 
+        }
+        
+        app.currentUser = email;
         sessionStorage.setItem('userEmail', app.currentUser);
 
         document.getElementById('auth-overlay').classList.add('hidden');
         document.getElementById('safety-banner').classList.remove('hidden');
         
-        let displayName = user.displayName || app.currentUser.split('@')[0];
+        let displayName = user.displayName || email.split('@')[0];
+        if (email === 'admin@europagym.at') displayName = "Admin";
+
         document.getElementById('current-user').innerText = displayName;
-        document.getElementById('user-initials').innerText = app.currentUser.charAt(0).toUpperCase();
-        document.getElementById('profile-email').innerText = app.currentUser;
+        document.getElementById('user-initials').innerText = displayName.charAt(0).toUpperCase();
+        document.getElementById('profile-email').innerText = email;
         
         app.showToast("Erfolgreich eingeloggt 🚀");
     },
@@ -169,10 +219,8 @@ const app = {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     },
 
-    // --- FIX: ID korrigiert ---
     checkVipStatus: () => {
-        // Einfache Logik: Habe ich eine bezahlte Bestellung gemacht?
-        const hasPaid = (app.data.orders || []).some(o => o.priceAtOrder > 0);
+        const hasPaid = (app.data.orders || []).some(o => o.priceAtOrder > 0 && o.sender === app.currentUser);
         app.isVip = hasPaid;
 
         const indicator = document.getElementById('vip-indicator'); 
@@ -187,37 +235,31 @@ const app = {
         }
     },
 
-    // --- FIX: Immer Passwort abfragen ---
     checkAdminAccess: () => {
-        // Kein Auto-Login mehr!
         document.getElementById('admin-auth-modal').classList.remove('hidden');
         document.getElementById('admin-user').value = "admin@europagym.at";
         document.getElementById('admin-pass').value = "";
     },
 
-    // --- ADMIN: Extra Login ---
     adminLogin: async () => {
         const email = document.getElementById('admin-user').value;
         const pass = document.getElementById('admin-pass').value;
         try {
-            // Meldet den Microsoft-User ab und den Admin an
+            if (auth.currentUser) await auth.signOut();
+            
             await auth.signInWithEmailAndPassword(email, pass);
             sessionStorage.setItem('adminUser', email);
             
             document.getElementById('admin-auth-modal').classList.add('hidden');
             app.nav('admin');
-            app.showToast("Willkommen Admin");
-
-            // WICHTIG: Als Admin laden wir jetzt ALLE Bestellungen
-            db.collection("orders").onSnapshot(snapshot => {
-                // Hier überschreiben wir die Liste mit ALLEN Daten
-                app.data.orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                app.renderOrders(); // Admin Tabelle rendern
-            });
+            
+            if (app.currentUser !== email) {
+                 location.reload(); 
+            }
 
         } catch (error) {
             console.error("Login Error:", error);
-            alert("Login fehlgeschlagen.");
+            alert("Login fehlgeschlagen: " + error.message);
         }
     },
 
@@ -234,9 +276,7 @@ const app = {
     },
 
     updateStats: () => {
-        // Nutzt jetzt den globalen Zähler
         const total = app.data.totalCount || 0;
-        
         const bigCount = document.getElementById('total-count-big');
         if(bigCount) bigCount.innerText = total;
 
@@ -303,13 +343,14 @@ const app = {
                 timestamp: Date.now(), vipImage: imageUrl
             };
 
-            // Bestellung speichern
             await db.collection("orders").doc(id).set(newOrder);
             
-            // --- FIX: Zähler erhöhen ---
             db.collection("metadata").doc("stats").update({
                 count: firebase.firestore.FieldValue.increment(1)
-            }).catch(e => console.log("Zähler-Fehler (evtl. noch nicht erstellt):", e));
+            }).catch(e => {
+                // Falls Counter noch nicht existiert -> erstellen
+                db.collection("metadata").doc("stats").set({ count: 1 });
+            });
 
             const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${id}&color=7c3aed&bgcolor=ffffff`;
             document.getElementById('qr-image').src = qrUrl;
@@ -338,7 +379,6 @@ const app = {
         }
     },
 
-    // --- Helpers & Renderers ---
     getPhaseName: () => {
         const count = app.data.totalCount || 0;
         if (count < 100) return "Start: 0% Rabatt";
@@ -378,7 +418,6 @@ const app = {
         if (posts.length === 0) { container.innerHTML = '<p class="text-gray-500 col-span-full text-center py-10">Keine Posts.</p>'; return; }
         posts.forEach(post => {
             const isLiked = liked.includes(post.id);
-            // Für globale VIPs im Feed bräuchte man eine User-Liste, hier vereinfacht:
             const isVipPost = vipUsers.has(post.author); 
             const vipClasses = isVipPost ? 'border-yellow-500/50 shadow-[0_0_20px_rgba(234,179,8,0.15)] bg-yellow-500/5' : '';
             const vipBadge = isVipPost ? '<div class="text-[8px] font-black text-yellow-500 mb-2 flex items-center gap-1"><i class="fa-solid fa-crown"></i> VIP STATUS</div>' : '';
@@ -425,8 +464,8 @@ const app = {
 
     renderMyOrders: () => {
         const list = document.getElementById('my-orders-list');
-        // Hier sind app.data.orders bereits gefiltert
-        const mine = (app.data.orders || []).sort((a,b) => b.timestamp - a.timestamp);
+        const mine = (app.data.orders || []).filter(o => o.sender === app.currentUser).sort((a,b) => b.timestamp - a.timestamp);
+        
         const steps = ['Bestellt', 'Bezahlt', 'In Zubereitung', 'In Zustellung', 'Geliefert'];
 
         list.innerHTML = mine.length ? mine.map(o => {
