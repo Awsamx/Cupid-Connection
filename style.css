@@ -1,0 +1,144 @@
+/* Global Styles */
+body { 
+    background-color: #030014; 
+    color: #ffffff; 
+    overflow-x: hidden; 
+    -webkit-tap-highlight-color: transparent; 
+}
+
+/* Ambient Background */
+.ambient-light { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; overflow: hidden; z-index: -1; pointer-events: none; }
+.blob { position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.3; animation: blob 10s infinite alternate; }
+.blob-1 { top: -10%; left: -10%; width: 500px; height: 500px; background: #7c3aed; }
+.blob-2 { bottom: -10%; right: -10%; width: 500px; height: 500px; background: #db2777; animation-delay: 2s; }
+
+/* Glassmorphism Logic */
+.glass-card {
+    background: rgba(15, 7, 32, 0.6);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Product Selection Logic (Highlighting) */
+/* Standard Items */
+label:has(input:checked) {
+    background: rgba(124, 58, 237, 0.15) !important;
+    border-color: rgba(124, 58, 237, 0.5) !important;
+    box-shadow: 0 0 15px rgba(124, 58, 237, 0.1);
+    transform: translateY(-2px);
+}
+
+/* Special Combo Highlight (Pink/Gold) */
+label:has(input[value="Full Combo"]:checked) {
+    background: linear-gradient(to right, rgba(219, 39, 119, 0.2), rgba(0,0,0,0)) !important;
+    border-color: #db2777 !important;
+    box-shadow: 0 0 25px rgba(219, 39, 119, 0.25);
+}
+
+/* Buttons */
+.btn-gradient {
+    background: linear-gradient(135deg, #7c3aed 0%, #db2777 100%);
+    color: white; font-weight: bold; position: relative; overflow: hidden;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(124, 58, 237, 0.3);
+}
+.btn-gradient:hover { box-shadow: 0 6px 20px rgba(219, 39, 119, 0.4); transform: translateY(-1px); }
+
+.btn-glass {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: white; transition: all 0.2s;
+}
+.btn-glass:hover { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.2); }
+
+.input-glass {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: white; transition: all 0.2s;
+}
+.input-glass:focus { outline: none; border-color: #7c3aed; background: rgba(0, 0, 0, 0.5); }
+
+/* Navigation & Layout Helpers */
+.page-section { display: none; opacity: 0; }
+.page-section.active { display: block; animation: fadeInUp 0.5s ease-out forwards; }
+.active-nav { color: #fff !important; background: rgba(255,255,255,0.1); }
+.heart-liked { color: #db2777 !important; animation: bounceShort 0.4s ease; }
+.masonry-item { break-inside: avoid; margin-bottom: 1rem; }
+.active-filter { background-color: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.3) !important; color: white !important; }
+
+/* Utilities */
+.scrollbar-none::-webkit-scrollbar { display: none; }
+.scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Scanner Specifics */
+#reader { border-radius: 1.5rem; overflow: hidden; border: 2px solid rgba(255,255,255,0.1); margin-top: 1rem; }
+#reader video { object-fit: cover; border-radius: 1.5rem; }
+
+
+/* =========================================
+   VIP FEATURES STYLING
+   ========================================= */
+
+/* 1. VIP Progress Bar Animation (Gold Shimmer) */
+#progress-vip-bar {
+    background-size: 200% 200%;
+    animation: gold-shimmer 3s linear infinite;
+    box-shadow: 0 0 15px rgba(234, 179, 8, 0.4); /* Amber Glow */
+}
+
+@keyframes gold-shimmer {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+/* 2. VIP Order Highlight (in Admin List) */
+.vip-order-highlight {
+    border-left: 4px solid #eab308 !important; /* Yellow-500 */
+    background: linear-gradient(90deg, rgba(234, 179, 8, 0.15), rgba(0,0,0,0)) !important;
+}
+
+/* 3. VIP Scanner Detail Frame (Gold Pulsing Border) */
+.vip-frame {
+    border: 2px solid #fbbf24 !important; /* Amber-400 */
+    box-shadow: 0 0 30px rgba(251, 191, 36, 0.3);
+    animation: pulse-gold 2s infinite;
+}
+
+@keyframes pulse-gold {
+    0% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.4); border-color: #fbbf24; }
+    70% { box-shadow: 0 0 0 10px rgba(251, 191, 36, 0); border-color: #fcd34d; }
+    100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); border-color: #fbbf24; }
+}
+
+/* 4. VIP Upload Section Hover Effect */
+#vip-upload-section:hover {
+    border-color: rgba(234, 179, 8, 0.8);
+    box-shadow: 0 0 20px rgba(234, 179, 8, 0.2);
+    transition: all 0.3s ease;
+}
+
+/* 5. Tracking Bar Steps */
+.tracking-step.active { background-color: #2dd4bf; border-color: #2dd4bf; }
+.tracking-line-fill { transition: width 1s cubic-bezier(0.4, 0, 0.2, 1); }
+/* =========================================
+   NEU: DYNAMISCHER GOLD STATUS
+   ========================================= */
+
+/* Diese Klasse wird per JS hinzugefügt, wenn < 100 Bestellungen */
+#progress-bar.is-gold {
+    background: linear-gradient(90deg, #ffd700, #ffec8b, #ffd700, #eab308) !important;
+    background-size: 200% 200% !important;
+    animation: gold-shimmer 2s linear infinite !important;
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.6), 0 0 40px rgba(255, 215, 0, 0.2) !important;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+/* Optional: Text-Farbe des Counters anpassen, wenn Gold aktiv ist */
+.gold-text-effect {
+    color: #ffd700 !important;
+    text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+}
