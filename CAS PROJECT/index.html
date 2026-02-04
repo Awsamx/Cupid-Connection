@@ -98,7 +98,12 @@
                 <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-brand-primary to-brand-secondary p-[1px]">
                     <div class="w-full h-full rounded-full bg-black flex items-center justify-center text-[10px] font-bold text-white uppercase" id="user-initials">?</div>
                 </div>
-                <span id="current-user" class="text-sm font-semibold text-gray-300 group-hover:text-brand-accent transition">user</span>
+                <div class="flex flex-col items-start">
+                    <div class="flex items-center gap-2">
+                        <span id="current-user" class="text-sm font-semibold text-gray-300 group-hover:text-brand-accent transition">user</span>
+                        <span id="vip-badge-header" class="hidden text-[9px] bg-yellow-500 text-black px-1.5 rounded font-black shadow-[0_0_10px_rgba(234,179,8,0.4)] animate-pulse">VIP</span>
+                    </div>
+                </div>
             </button>
             <button onclick="app.logout()" class="text-gray-500 hover:text-red-400 transition text-xs font-bold uppercase tracking-widest">Logout</button>
         </div>

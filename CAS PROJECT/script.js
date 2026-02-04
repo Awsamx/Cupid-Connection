@@ -180,15 +180,68 @@ const app = {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     },
 
+    // --- ÄNDERUNG 1: VIP STATUS AUCH IM HEADER ANZEIGEN ---
     checkVipStatus: () => {
         const vipUsers = app.getVipList();
         app.isVip = vipUsers.has(app.currentUser);
 
+        // Elemente holen
+        const indicator = document.getElementById('vip-indicator'); // Falls du das irgendwo anders hast
+        const headerBadge = document.getElementById('header-vip-badge'); // Das neue im Header
+
         if (app.isVip) {
-            document.getElementById('vip-indicator')?.classList.remove('hidden');
+            if(indicator) indicator.classList.remove('hidden');
+            if(headerBadge) headerBadge.classList.remove('hidden');
         } else {
-            document.getElementById('vip-indicator')?.classList.add('hidden');
+            if(indicator) indicator.classList.add('hidden');
+            if(headerBadge) headerBadge.classList.add('hidden');
         }
+    },
+
+    // --- ÄNDERUNG 2: ADMIN ZUGANG IMMER ABFRAGEN ---
+    checkAdminAccess: () => {
+        // Wir prüfen NICHT mehr sessionStorage.getItem('adminUser'),
+        // sondern zwingen den User immer zur Eingabe.
+        
+        // Modal öffnen
+        document.getElementById('admin-auth-modal').classList.remove('hidden');
+        
+        // Optional: Admin-Formular zurücksetzen, damit Felder leer sind
+        document.getElementById('admin-user').value = "";
+        document.getElementById('admin-pass').value = "";
+    },
+    
+    // (Optional) Update auch diese Funktion, damit das VIP Badge beim Laden der Stats aktualisiert wird
+    updateStats: () => {
+        const total = (app.data.orders || []).length;
+        const bigCount = document.getElementById('total-count-big');
+        if(bigCount) bigCount.innerText = total;
+
+        const maxGoal = 500; 
+        let percentage = (total / maxGoal) * 100;
+        if(percentage > 100) percentage = 100;
+
+        const bar = document.getElementById('progress-bar');
+        
+        if (total < 100) {
+            bar.classList.add('is-gold'); 
+            if(bigCount) {
+                bigCount.classList.add('gold-text-effect');
+                bigCount.classList.remove('text-brand-accent');
+            }
+        } else {
+            bar.classList.remove('is-gold');
+            if(bigCount) {
+                bigCount.classList.remove('gold-text-effect');
+                bigCount.classList.add('text-brand-accent');
+            }
+        }
+
+        bar.style.width = percentage + '%';
+        
+        // WICHTIG: Hier prüfen wir jedes Mal den VIP Status neu, wenn Daten reinkommen
+        app.checkVipStatus(); 
+        app.updateTotal(); 
     },
 
     renderFeed: (filter = 'all') => {
