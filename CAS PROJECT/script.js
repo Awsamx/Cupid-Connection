@@ -29,48 +29,53 @@ const app = {
     listenersStarted: false,
 
     priceList: {
-        "Brief": 0.00,
-        "Brief + Keks": 1.00,
-        "Brief + Hariborose": 1.00,
-        "Brief + Papierrose": 2.00,
-        "Brief + Hariborose + Keks": 2.00,
-        "Brief + Papierrose + Keks": 2.50,
-        "Brief + Keks + Hariborose + Papierrose": 3.50
+        "Brief": 0.00, "Brief + Keks": 1.00, "Brief + Hariborose": 1.00,
+        "Brief + Papierrose": 2.00, "Brief + Hariborose + Keks": 2.00,
+        "Brief + Papierrose + Keks": 2.50, "Brief + Keks + Hariborose + Papierrose": 3.50
     },
 
-    init: async () => {
-        // UI vorbereiten
-        document.getElementById('auth-loading').classList.remove('hidden');
-        document.getElementById('login-container').classList.add('hidden');
+    // --- OPTIMIERTE INIT FUNKTION (SCHNELLER START) ---
+    init: () => {
+        // UI auf Standard setzen (Lade-Spinner an, Login aus)
+        const loadingEl = document.getElementById('auth-loading');
+        const loginContainer = document.getElementById('login-container');
+        const overlay = document.getElementById('auth-overlay');
+        
+        loadingEl.classList.remove('hidden');
+        loginContainer.classList.add('hidden');
 
-        // FIX 1: Persistence SOFORT setzen, nicht erst beim Klick!
-        // Das verhindert Timing-Probleme.
+        // 1. Persistence setzen (Im Hintergrund - blockiert nicht den Klick!)
+        // Wir machen das hier, damit es beim Klick schon fertig ist.
         auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
             .then(() => {
-                // FIX 2: Erst NACH Persistence Check nach Redirect schauen
-                return auth.getRedirectResult();
+                console.log("Persistence auf LOCAL gesetzt.");
             })
-            .then((result) => {
-                if (result.user) {
-                    console.log("Redirect Login erfolgreich.");
-                    // onAuthStateChanged wird gleich feuern
-                }
-            })
-            .catch((error) => {
-                console.error("Auth Init Fehler:", error);
-            });
+            .catch(e => console.warn(e));
 
-        // Auth-Status Listener (Das Herzstück)
+        // 2. Redirect Ergebnis prüfen (Im Hintergrund)
+        auth.getRedirectResult().then((result) => {
+            if (result.user) {
+                console.log("Redirect Login erkannt.");
+                // onAuthStateChanged wird gleich feuern
+            }
+        }).catch(error => {
+            // Fehler hier ignorieren, da Login Button eh gleich kommt
+            console.log("Kein Redirect Return gefunden.");
+        });
+
+        // 3. Der wichtigste Listener: Feuert sobald Firebase bereit ist
         auth.onAuthStateChanged((user) => {
             if (user) {
+                // User gefunden -> App starten
                 app.handleLoginSuccess(user);
                 if (!app.listenersStarted) {
                     app.startDatabaseListeners();
                 }
             } else {
-                document.getElementById('auth-overlay').classList.remove('hidden');
-                document.getElementById('auth-loading').classList.add('hidden');
-                document.getElementById('login-container').classList.remove('hidden');
+                // Kein User -> Login Button zeigen (Sofort)
+                loadingEl.classList.add('hidden');
+                loginContainer.classList.remove('hidden');
+                overlay.classList.remove('hidden');
                 app.listenersStarted = false;
             }
         });
@@ -82,13 +87,11 @@ const app = {
 
     // --- LOGIN FUNKTION (Jetzt ohne Verzögerung) ---
     loginWithMicrosoft: () => {
-        // WICHTIG: Kein 'async' hier, damit der Browser den Klick direkt verarbeitet!
+        // WICHTIG: Kein 'async' und kein 'await' hier!
+        // Der Browser muss den Klick direkt verarbeiten.
         
         const provider = new firebase.auth.OAuthProvider('microsoft.com');
-        provider.setCustomParameters({
-            prompt: 'select_account',
-            tenant: 'f7bb63a9-5ed7-4a21-b43a-3f684ec4938b' 
-        });
+        provider.setCustomParameters({ prompt: 'select_account', tenant: 'f7bb63a9-5ed7-4a21-b43a-3f684ec4938b' });
 
         // Browser-Erkennung
         const ua = navigator.userAgent || navigator.vendor || window.opera;
@@ -99,28 +102,28 @@ const app = {
         document.getElementById('auth-loading').classList.remove('hidden');
 
         if (isInApp) {
-            // Instagram/TikTok: Redirect (Da Popups technisch unmöglich sind)
-            console.log("In-App Browser: Redirect");
+            // Instagram: Redirect
+            console.log("In-App: Redirect");
             auth.signInWithRedirect(provider).catch(err => {
-                alert("Fehler beim Redirect Start: " + err.message);
-                location.reload();
+                alert("Fehler: " + err.message);
+                location.reload(); 
             });
         } else {
-            // Safari/Chrome: Popup (Da wir kein 'await' davor haben, erlaubt Safari das jetzt!)
-            console.log("Standard Browser: Popup");
+            // Safari/Chrome: Popup (Feuert jetzt SOFORT)
+            console.log("Standard: Popup");
             auth.signInWithPopup(provider).catch(error => {
                 console.error("Popup Fehler:", error);
-                if (error.code === 'auth/popup-closed-by-user') {
-                    // User hat Fenster zugemacht - Reset UI
-                    document.getElementById('login-container').classList.remove('hidden');
-                    document.getElementById('auth-loading').classList.add('hidden');
-                } else if (error.code === 'auth/popup-blocked') {
-                    alert("Popup immer noch blockiert? Bitte Einstellungen prüfen.");
-                    document.getElementById('login-container').classList.remove('hidden');
-                    document.getElementById('auth-loading').classList.add('hidden');
-                } else {
-                    alert("Login Fehler: " + error.message);
-                    location.reload();
+                
+                // UI Reset bei Abbruch/Fehler
+                document.getElementById('login-container').classList.remove('hidden');
+                document.getElementById('auth-loading').classList.add('hidden');
+                
+                if (error.code !== 'auth/popup-closed-by-user') {
+                    if (error.code === 'auth/popup-blocked') {
+                        alert("Popup blockiert. Bitte Einstellungen prüfen.");
+                    } else {
+                        alert("Login Fehler: " + error.message);
+                    }
                 }
             });
         }
@@ -128,10 +131,9 @@ const app = {
 
     handleLoginSuccess: (user) => {
         const email = user.email.toLowerCase();
-        
         if (!email.endsWith('@europagym.at') && email !== 'admin@europagym.at') { 
             auth.signOut(); 
-            alert("Nur @europagym.at erlaubt.");
+            alert("Nur @europagym.at Adressen erlaubt.");
             return; 
         }
         
@@ -165,27 +167,19 @@ const app = {
         });
 
         let ordersQuery = db.collection("orders");
-        if (app.currentUser !== 'admin@europagym.at') {
-            ordersQuery = ordersQuery.where("sender", "==", app.currentUser);
-        }
-
+        if (app.currentUser !== 'admin@europagym.at') ordersQuery = ordersQuery.where("sender", "==", app.currentUser);
         ordersQuery.onSnapshot(snapshot => {
             app.data.orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             if (app.currentUser === 'admin@europagym.at') {
                 app.data.orders.sort((a,b) => b.timestamp - a.timestamp);
                 app.renderOrders(); 
             }
-            app.renderMyOrders();
-            app.checkVipStatus();
+            app.renderMyOrders(); app.checkVipStatus();
         });
 
         db.collection("metadata").doc("stats").onSnapshot(doc => {
-            if (doc.exists) {
-                app.data.totalCount = doc.data().count || 0;
-                app.updateStats();
-            }
+            if (doc.exists) { app.data.totalCount = doc.data().count || 0; app.updateStats(); }
         });
-        
         app.initPresence();
     },
 
@@ -224,42 +218,26 @@ const app = {
         const total = app.data.totalCount || 0;
         const bigCount = document.getElementById('total-count-big');
         if(bigCount) bigCount.innerText = total;
-
         const maxGoal = 500; 
         let percentage = (total / maxGoal) * 100;
         if(percentage > 100) percentage = 100;
-
         const bar = document.getElementById('progress-bar');
-        
         if (total < 100) {
             if(bar) bar.classList.add('is-gold');
-            if(bigCount) {
-                bigCount.classList.add('gold-text-effect');
-                bigCount.classList.remove('text-brand-accent');
-            }
+            if(bigCount) { bigCount.classList.add('gold-text-effect'); bigCount.classList.remove('text-brand-accent'); }
         } else {
             if(bar) bar.classList.remove('is-gold');
-            if(bigCount) {
-                bigCount.classList.remove('gold-text-effect');
-                bigCount.classList.add('text-brand-accent');
-            }
+            if(bigCount) { bigCount.classList.remove('gold-text-effect'); bigCount.classList.add('text-brand-accent'); }
         }
         if(bar) bar.style.width = percentage + '%';
         app.updateTotal(); 
     },
 
-    logout: () => {
-        sessionStorage.removeItem('userEmail');
-        auth.signOut().then(() => location.reload());
-    },
-
+    logout: () => { sessionStorage.removeItem('userEmail'); auth.signOut().then(() => location.reload()); },
     nav: (id) => {
         document.querySelectorAll('.page-section').forEach(s => s.classList.remove('active'));
         document.getElementById(id).classList.add('active');
-        document.querySelectorAll('nav button').forEach(b => {
-            b.classList.remove('active-nav', 'text-white');
-            b.classList.add('text-gray-500');
-        });
+        document.querySelectorAll('nav button').forEach(b => { b.classList.remove('active-nav', 'text-white'); b.classList.add('text-gray-500'); });
         const btn = document.getElementById('nav-' + id);
         if(btn) { btn.classList.remove('text-gray-500'); btn.classList.add('active-nav', 'text-white'); }
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -277,17 +255,13 @@ const app = {
             await auth.signInWithEmailAndPassword(email, pass);
             document.getElementById('admin-auth-modal').classList.add('hidden');
             setTimeout(() => location.reload(), 500); 
-        } catch (error) {
-            alert("Login fehlgeschlagen: " + error.message);
-        }
+        } catch (error) { alert("Login fehlgeschlagen: " + error.message); }
     },
 
     adminTab: (tab) => {
         document.querySelectorAll('.admin-view').forEach(v => v.classList.add('hidden'));
         document.getElementById('admin-' + tab).classList.remove('hidden');
-        document.querySelectorAll('.admin-tab-btn').forEach(b => {
-            b.classList.remove('bg-white/10', 'text-white'); b.classList.add('text-gray-500');
-        });
+        document.querySelectorAll('.admin-tab-btn').forEach(b => { b.classList.remove('bg-white/10', 'text-white'); b.classList.add('text-gray-500'); });
         const btn = document.getElementById('t-' + tab);
         if(btn) { btn.classList.add('bg-white/10', 'text-white'); btn.classList.remove('text-gray-500'); }
         if(tab === 'mod') app.renderModQueue();
@@ -302,66 +276,30 @@ const app = {
         const message = document.getElementById('order-message').value;
         const selectedBtn = document.querySelector('input[name="product"]:checked');
         const fileInput = document.getElementById('order-image');
-
-        if (!recipient || !grade || !room || !message) { alert("Bitte alle Felder ausfüllen."); return; }
-
-        let currentPrice = app.priceList[selectedBtn.value];
-        if (currentPrice === undefined) currentPrice = 0;
-        const basePrice = currentPrice;
+        if (!recipient || !grade || !room || !message) { alert("Bitte ausfüllen."); return; }
+        let currentPrice = app.priceList[selectedBtn.value] || 0;
         if (app.isVip && currentPrice > 0) currentPrice *= 0.85;
-
         const submitBtn = document.querySelector('#order-form button[type="submit"]');
         submitBtn.disabled = true;
-        submitBtn.innerText = "Sende Daten...";
-
         try {
             let imageUrl = null;
             if (app.isVip && fileInput && fileInput.files.length > 0) {
-                submitBtn.innerText = "Lade Bild hoch...";
+                submitBtn.innerText = "Lade Bild...";
                 const file = fileInput.files[0];
                 const storageRef = storage.ref(`vip_uploads/${id}_${file.name}`);
                 await storageRef.put(file);
                 imageUrl = await storageRef.getDownloadURL();
             }
-
-            const newOrder = {
-                recipient: recipient, grade: grade, room: room,
-                product: selectedBtn.value, message: message, vibe: document.getElementById('order-vibe').value,
-                sender: app.currentUser, status: 'Bestellt', 
-                isVip: app.isVip, priceAtOrder: basePrice, 
-                timestamp: Date.now(), vipImage: imageUrl
-            };
-
+            const newOrder = { recipient, grade, room, product: selectedBtn.value, message, vibe: document.getElementById('order-vibe').value, sender: app.currentUser, status: 'Bestellt', isVip: app.isVip, priceAtOrder: currentPrice, timestamp: Date.now(), vipImage: imageUrl };
             await db.collection("orders").doc(id).set(newOrder);
-            await db.collection("metadata").doc("stats").set({
-                count: firebase.firestore.FieldValue.increment(1)
-            }, { merge: true });
-
-            const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${id}&color=7c3aed&bgcolor=ffffff`;
-            document.getElementById('qr-image').src = qrUrl;
+            await db.collection("metadata").doc("stats").set({ count: firebase.firestore.FieldValue.increment(1) }, { merge: true });
+            document.getElementById('qr-image').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${id}&color=7c3aed&bgcolor=ffffff`;
             document.getElementById('qr-order-id').innerText = id;
-            
-            const vipBadge = app.isVip ? '<span class="ml-2 bg-[#fbbf24] text-black text-[9px] px-1 rounded font-bold">VIP</span>' : '';
-            const priceText = currentPrice === 0 ? "Kostenlos" : currentPrice.toFixed(2).replace('.', ',') + "€";
-
-            document.getElementById('qr-summary').innerHTML = `
-                <div class="flex justify-between"><span>Produkt:</span> <span class="text-white font-bold">${newOrder.product}</span></div>
-                <div class="flex justify-between"><span>An:</span> <span class="text-white">${newOrder.recipient}</span></div>
-                ${imageUrl ? '<div class="flex justify-between text-yellow-500 text-[10px]"><span>+ Bild Upload</span> <i class="fa-solid fa-check"></i></div>' : ''}
-                <div class="flex justify-between mt-2 pt-2 border-t border-white/10 font-bold"><span>Zu zahlen:</span> <span class="text-brand-accent text-lg">${priceText} ${vipBadge}</span></div>
-            `;
-
+            document.getElementById('qr-summary').innerHTML = `<div class="flex justify-between"><span>Produkt:</span> <span class="text-white font-bold">${newOrder.product}</span></div>`;
             document.getElementById('qr-modal').classList.remove('hidden');
             document.getElementById('order-form').reset();
             app.updateTotal(); 
-
-        } catch (err) {
-            console.error(err);
-            alert("Fehler beim Bestellen: " + err.message);
-        } finally {
-            submitBtn.disabled = false;
-            submitBtn.innerText = "Bestellen & Code generieren";
-        }
+        } catch (err) { alert(err.message); } finally { submitBtn.disabled = false; submitBtn.innerText = "Bestellen & Code generieren"; }
     },
 
     getPhaseName: () => {
@@ -376,11 +314,9 @@ const app = {
     updateTotal: () => {
         const selected = document.querySelector('input[name="product"]:checked');
         if (!selected) return;
-        let price = app.priceList[selected.value];
-        if (price === undefined) price = parseFloat(selected.dataset.price) || 0;
+        let price = app.priceList[selected.value] || 0;
         if (app.isVip && price > 0) price = price * 0.85; 
-        const displayPrice = price === 0 ? "Gratis" : price.toFixed(2).replace('.', ',') + '€';
-        document.getElementById('order-total').innerText = (app.isVip ? "👑 " : "") + displayPrice;
+        document.getElementById('order-total').innerText = (app.isVip ? "👑 " : "") + (price === 0 ? "Gratis" : price.toFixed(2).replace('.', ',') + '€');
         document.getElementById('price-phase-badge').innerText = app.getPhaseName();
     },
 
@@ -396,59 +332,26 @@ const app = {
         const container = document.getElementById('feed-container');
         if (!container) return;
         container.innerHTML = '';
-        
-        let liked = [];
-        try { liked = JSON.parse(localStorage.getItem('cupid_likes')) || []; } catch(e) {}
-        
-        const vipUsers = app.getVipList();
         let posts = (app.data.posts || []).filter(p => p.approved);
-        
-        if(filter === 'new') posts.sort((a,b) => b.timestamp - a.timestamp);
-        else posts.sort((a,b) => b.hearts - a.hearts); 
-        
-        if (posts.length === 0) { 
-            container.innerHTML = '<p class="text-gray-500 col-span-full text-center py-10">Keine Posts.</p>'; 
-            return; 
-        }
-        
+        if(filter === 'new') posts.sort((a,b) => b.timestamp - a.timestamp); else posts.sort((a,b) => b.hearts - a.hearts); 
         posts.forEach(post => {
-            const isLiked = liked.includes(post.id);
-            const isVipPost = vipUsers.has(post.author); 
-            const vipClasses = isVipPost ? 'border-yellow-500/50 shadow-[0_0_20px_rgba(234,179,8,0.15)] bg-yellow-500/5' : '';
-            const vipBadge = isVipPost ? '<div class="text-[8px] font-black text-yellow-500 mb-2 flex items-center gap-1"><i class="fa-solid fa-crown"></i> VIP STATUS</div>' : '';
-            const verifyLabel = isVipPost ? '<span class="text-[9px] font-bold text-yellow-500 uppercase">Verifiziert</span>' : '<span class="text-[9px] font-bold text-gray-500 uppercase">Community</span>';
             container.innerHTML += `
-                <div class="masonry-item glass-card p-6 rounded-2xl break-inside-avoid mb-4 ${vipClasses}">
-                    ${vipBadge}
-                    <p class="text-gray-200 text-sm leading-relaxed mb-4">"${post.text}"</p>
+                <div class="glass-card p-6 rounded-2xl mb-4">
+                    <p class="text-gray-200 text-sm mb-4">"${post.text}"</p>
                     <div class="flex justify-between items-center pt-3 border-t border-white/5">
-                        ${verifyLabel}
-                        <button onclick="app.heartPost('${post.id}')" class="flex items-center gap-2 ${isLiked ? 'heart-liked' : 'text-gray-500'} transition">
-                            <i class="fa-solid fa-heart"></i> <span class="text-xs font-bold">${post.hearts || 0}</span>
-                        </button>
+                        <span class="text-[9px] font-bold text-gray-500 uppercase">Community</span>
+                        <button onclick="app.heartPost('${post.id}')" class="text-gray-500"><i class="fa-solid fa-heart"></i> ${post.hearts || 0}</button>
                     </div>
                 </div>`;
         });
     },
 
-    heartPost: (id) => {
-        let liked = JSON.parse(localStorage.getItem('cupid_likes')) || [];
-        if(liked.includes(id)) return; 
-        liked.push(id);
-        localStorage.setItem('cupid_likes', JSON.stringify(liked));
-        db.collection("posts").doc(id).update({ hearts: firebase.firestore.FieldValue.increment(1) }).catch(console.error);
-    },
-
+    heartPost: (id) => db.collection("posts").doc(id).update({ hearts: firebase.firestore.FieldValue.increment(1) }),
     submitPost: () => {
         const txt = document.getElementById('new-post-content').value;
         if(!txt.trim()) return;
-        db.collection("posts").add({
-            text: txt, hearts: 0, approved: false, timestamp: Date.now(), author: app.currentUser 
-        }).then(() => {
-            document.getElementById('new-post-content').value = '';
-            document.getElementById('post-modal').classList.add('hidden');
-            app.showToast("Post gesendet (Wartet auf Freigabe)");
-        }).catch(err => alert("Fehler: " + err));
+        db.collection("posts").add({ text: txt, hearts: 0, approved: false, timestamp: Date.now(), author: app.currentUser })
+        .then(() => { document.getElementById('new-post-content').value = ''; document.getElementById('post-modal').classList.add('hidden'); app.showToast("Wartet auf Freigabe"); });
     },
 
     filterWall: (type) => {
@@ -460,121 +363,64 @@ const app = {
     renderMyOrders: () => {
         const list = document.getElementById('my-orders-list');
         const mine = (app.data.orders || []).filter(o => o.sender === app.currentUser).sort((a,b) => b.timestamp - a.timestamp);
-        
-        const steps = ['Bestellt', 'Bezahlt', 'In Zubereitung', 'In Zustellung', 'Geliefert'];
-
-        list.innerHTML = mine.length ? mine.map(o => {
-            let currentIdx = steps.indexOf(o.status);
-            if(currentIdx === -1) currentIdx = 0;
-            const progress = (currentIdx / (steps.length - 1)) * 100;
-            const vipTag = o.isVip ? '<span class="text-[9px] bg-yellow-500/20 text-yellow-500 border border-yellow-500/50 px-1 rounded ml-2">VIP</span>' : '';
-            return `
-                <div class="glass-card p-6 rounded-[2rem] mb-4 relative overflow-hidden ${o.isVip ? 'border border-yellow-500/20' : ''}">
-                    <div class="flex justify-between items-start mb-6">
-                        <div>
-                            <div class="text-[10px] text-brand-primary font-mono font-bold flex items-center">${o.id} ${vipTag}</div>
-                            <div class="font-bold text-white text-lg">${o.recipient}</div>
-                            <div class="text-xs text-gray-400">${o.product}</div>
-                        </div>
-                        <div class="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[10px] font-bold uppercase tracking-wider text-brand-accent">
-                            ${o.status}
-                        </div>
-                    </div>
-                    <div class="relative w-full h-2 bg-white/10 rounded-full mb-8 mt-2">
-                        <div class="tracking-line-fill absolute top-0 left-0 h-full bg-gradient-to-r from-brand-primary to-brand-accent rounded-full shadow-[0_0_10px_#2dd4bf]" style="width: ${progress}%"></div>
-                    </div>
+        list.innerHTML = mine.map(o => `
+            <div class="glass-card p-6 rounded-[2rem] mb-4">
+                <div class="flex justify-between items-start mb-6">
+                    <div><div class="text-[10px] text-brand-primary font-mono">${o.id}</div><div class="font-bold text-white">${o.recipient}</div></div>
+                    <div class="text-brand-accent text-[10px] uppercase font-bold">${o.status}</div>
                 </div>
-            `;
-        }).join('') : '<div class="text-center text-gray-500 py-10">Keine Bestellungen.</div>';
+            </div>`).join('') || '<div class="text-center text-gray-500">Keine Bestellungen.</div>';
     },
 
     renderOrders: () => {
         const list = document.getElementById('orders-list');
-        const sortedOrders = (app.data.orders || []).slice().sort((a,b) => {
-            if(a.isVip && !b.isVip) return 1; if(!a.isVip && b.isVip) return -1;
-            return a.timestamp - b.timestamp;
-        });
-        list.innerHTML = sortedOrders.reverse().map(o => `
-            <div class="glass-card p-4 rounded-xl text-xs space-y-2 ${o.status === 'Geliefert' ? 'opacity-50' : 'bg-black/40'} ${o.isVip ? 'vip-order-highlight' : ''}">
-                <div class="flex justify-between font-bold">
-                    <span class="${o.isVip ? 'text-yellow-500' : 'text-brand-accent'} font-mono">${o.id} ${o.isVip ? '👑' : ''}</span>
-                    <span class="${o.status === 'Bezahlt' ? 'text-green-400' : 'text-yellow-500'} uppercase">${o.status}</span>
-                </div>
-                <div class="text-white font-bold">${o.product} für ${o.recipient}</div>
-                ${o.vipImage ? '<div class="text-[9px] text-yellow-500"><i class="fa-solid fa-image"></i> Bild liegt bei</div>' : ''}
-                <button onclick="app.showOrderDetails('${o.id}')" class="w-full mt-2 py-2 bg-white/5 hover:bg-white/10 rounded font-bold">Öffnen</button>
-            </div>
-        `).join('') || '<p class="text-center text-gray-500">Keine Daten.</p>';
+        list.innerHTML = (app.data.orders || []).map(o => `
+            <div class="glass-card p-4 rounded-xl text-xs mb-2">
+                <div class="flex justify-between font-bold"><span>${o.id}</span><span>${o.status}</span></div>
+                <div class="text-white">${o.product} für ${o.recipient}</div>
+                <button onclick="app.showOrderDetails('${o.id}')" class="w-full mt-2 py-2 bg-white/5 rounded">Öffnen</button>
+            </div>`).join('');
     },
 
     renderModQueue: () => {
         const q = document.getElementById('mod-queue');
-        if (!q) return;
         const pending = (app.data.posts || []).filter(p => !p.approved);
-        q.innerHTML = pending.length ? pending.map(p => `
-            <div class="glass-card p-4 rounded-2xl flex justify-between items-center bg-black/40">
-                <div class="w-2/3"><div class="text-[10px] text-gray-500 uppercase font-bold mb-1">${p.author}</div><p class="text-xs text-gray-300">"${p.text}"</p></div>
+        q.innerHTML = pending.map(p => `
+            <div class="glass-card p-4 flex justify-between items-center mb-2">
+                <p class="text-xs">"${p.text}"</p>
                 <div class="flex gap-2">
-                    <button onclick="app.modAction('${p.id}', true)" class="w-10 h-10 rounded-xl bg-green-500/20 text-green-500"><i class="fa-solid fa-check"></i></button>
-                    <button onclick="app.modAction('${p.id}', false)" class="w-10 h-10 rounded-xl bg-red-500/20 text-red-500"><i class="fa-solid fa-xmark"></i></button>
+                    <button onclick="app.modAction('${p.id}', true)" class="text-green-500">✔</button>
+                    <button onclick="app.modAction('${p.id}', false)" class="text-red-500">✘</button>
                 </div>
-            </div>
-        `).join('') : '<p class="text-center text-gray-500 italic">Queue leer.</p>';
+            </div>`).join('');
     },
 
-    modAction: (id, approve) => {
-        const docRef = db.collection("posts").doc(id);
-        if(approve) docRef.update({ approved: true }).catch(err => alert(err));
-        else docRef.delete().catch(err => alert(err));
-    },
+    modAction: (id, approve) => approve ? db.collection("posts").doc(id).update({ approved: true }) : db.collection("posts").doc(id).delete(),
 
     startScanner: () => {
         document.getElementById('reader').classList.remove('hidden');
         app.html5QrCode = new Html5Qrcode("reader");
-        app.html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, (decodedText) => {
-            app.html5QrCode.stop().then(() => {
-                document.getElementById('reader').classList.add('hidden');
-                document.getElementById('reader').innerHTML = ""; 
-            });
-            app.showOrderDetails(decodedText);
-            app.showToast("Code erkannt!");
-        }).catch(err => alert("Kamera-Fehler: " + err));
+        app.html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (txt) => {
+            app.html5QrCode.stop().then(() => { document.getElementById('reader').classList.add('hidden'); app.showOrderDetails(txt); });
+        }).catch(err => alert("Kamera Fehler: " + err));
     },
 
     showOrderDetails: (id) => {
         const order = app.data.orders.find(o => o.id === id);
-        if (!order) return alert("Bestellung nicht gefunden (oder noch nicht geladen)!");
+        if (!order) return;
         app.activeOrderId = id;
-        const modal = document.querySelector('#active-order-view .glass-card');
-        if (order.isVip) {
-            modal.classList.add('vip-frame'); 
-            document.getElementById('det-id').innerHTML = `${order.id} <span class="ml-2 text-yellow-500 text-xs border border-yellow-500 px-1 rounded bg-yellow-500/10">VIP</span>`;
-        } else {
-            modal.classList.remove('vip-frame');
-            document.getElementById('det-id').innerText = order.id;
-        }
+        document.getElementById('det-id').innerText = id;
         document.getElementById('det-recipient').innerText = order.recipient;
         document.getElementById('det-room').innerText = `${order.room} (${order.grade})`;
-        const priceDisplay = order.priceAtOrder !== undefined ? ` (${order.priceAtOrder.toFixed(2)}€)` : '';
-        document.getElementById('det-product').innerText = order.product + priceDisplay;
-        let msgHtml = `"${order.message}"`;
-        if (order.vipImage) msgHtml += `<div class="mt-3"><img src="${order.vipImage}" class="rounded-xl w-full max-h-40 object-cover border border-yellow-500/50"></div>`;
-        document.getElementById('det-message').innerHTML = msgHtml;
+        document.getElementById('det-product').innerText = order.product;
+        document.getElementById('det-message').innerText = order.message;
         document.getElementById('active-order-view').classList.remove('hidden');
     },
 
-    updateStatus: (newStatus) => {
-        if (!app.activeOrderId) return;
-        db.collection("orders").doc(app.activeOrderId).update({ status: newStatus })
-        .then(() => {
-            app.showToast("Status: " + newStatus);
-            document.getElementById('active-order-view').classList.add('hidden');
-        }).catch(err => alert("Fehler: " + err));
-    },
+    updateStatus: (newStatus) => db.collection("orders").doc(app.activeOrderId).update({ status: newStatus }).then(() => { app.showToast(newStatus); document.getElementById('active-order-view').classList.add('hidden'); }),
 
     showToast: (msg) => {
         const t = document.getElementById('toast');
-        if(!t) return;
         document.getElementById('toast-msg').innerText = msg;
         t.classList.remove('translate-x-[150%]');
         setTimeout(() => t.classList.add('translate-x-[150%]'), 3000);
