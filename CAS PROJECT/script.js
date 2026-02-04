@@ -9,8 +9,6 @@ const firebaseConfig = {
     measurementId: "G-BG2LW0BTDZ"
 };
 
-// Hinweis: MSAL Config wurde entfernt, da wir jetzt nativen Firebase Auth nutzen!
-
 // --- 2. INITIALISIERUNG ---
 try {
     firebase.initializeApp(firebaseConfig);
@@ -28,23 +26,30 @@ const app = {
     html5QrCode: null,
     activeOrderId: null,
     isVip: false,
-    listenersStarted: false, // Verhindert doppeltes Laden
+    listenersStarted: false,
+
+    // --- NEU: FIXE PREISLISTE ---
+    // Stelle sicher, dass die value="" Attribute in deiner HTML genau diesen Namen entsprechen!
+    priceList: {
+        "Brief": 0.00,
+        "Brief + Keks": 1.00,
+        "Brief + Hariborose": 1.00,
+        "Brief + Papierrose": 2.00,
+        "Brief + Hariborose + Keks": 2.00,
+        "Brief + Papierrose + Keks": 2.50,
+        "Brief + Keks + Hariborose + Papierrose": 3.50
+    },
 
     init: async () => {
-        // Prüfen, ob User bereits eingeloggt ist (Persistenz)
         auth.onAuthStateChanged((user) => {
             if (user) {
-                // User ist eingeloggt
                 app.handleLoginSuccess(user);
-                // WICHTIG: Datenbank erst verbinden, wenn Login bestätigt ist!
                 app.startDatabaseListeners();
             } else {
-                // Kein User -> Login Screen zeigen
                 document.getElementById('auth-overlay').classList.remove('hidden');
             }
         });
 
-        // Admin Session Check
         const adminUser = sessionStorage.getItem('adminUser');
         if(adminUser) console.log("Admin Session aktiv");
 
@@ -53,21 +58,18 @@ const app = {
         app.setVibe('classic');
     },
 
-    // --- NEUE FUNKTION: Startet die Datenbank-Verbindung erst NACH Login ---
     startDatabaseListeners: () => {
-        if (app.listenersStarted) return; // Nur einmal starten
+        if (app.listenersStarted) return;
         app.listenersStarted = true;
 
         console.log("Starte Datenbank-Verbindungen...");
 
-        // Firestore Listener: Posts (Hype Wall)
         db.collection("posts").orderBy("timestamp", "desc").onSnapshot(snapshot => {
             app.data.posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             app.renderFeed();
             app.renderModQueue(); 
         }, err => console.log("Post-Fehler:", err));
 
-        // Firestore Listener: Bestellungen
         db.collection("orders").onSnapshot(snapshot => {
             app.data.orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             app.updateStats(); 
@@ -75,7 +77,6 @@ const app = {
             app.renderOrders(); 
         }, err => console.log("Order-Fehler:", err));
         
-        // Realtime Database: Online-Status
         app.initPresence();
     },
 
@@ -100,22 +101,18 @@ const app = {
         });
     },
 
-    // --- VIP STATUS BERECHNEN ---
     getVipList: () => {
         const paidOrders = (app.data.orders || []).filter(o => {
-            const isPaidProduct = ['Keks', 'Rose', 'Full Combo'].includes(o.product);
-            return (o.priceAtOrder > 0) || (isPaidProduct && o.product !== 'Brief');
+            // Logik: Wer Geld ausgegeben hat (Preis > 0), zählt als potenzieller VIP
+            return (o.priceAtOrder > 0);
         });
 
         const sorted = paidOrders.sort((a, b) => a.timestamp - b.timestamp);
         return new Set(sorted.slice(0, 100).map(o => o.sender));
     },
 
-    // --- LOGIN PROZESS (NATIVE FIREBASE AUTH) ---
     loginWithMicrosoft: async () => {
         const provider = new firebase.auth.OAuthProvider('microsoft.com');
-
-        // Tenant-ID erzwingt Login nur für deine Schule
         provider.setCustomParameters({
             prompt: 'select_account',
             tenant: 'f7bb63a9-5ed7-4a21-b43a-3f684ec4938b' 
@@ -128,9 +125,8 @@ const app = {
             const result = await auth.signInWithPopup(provider);
             const user = result.user;
             
-            // Zusätzliche E-Mail Prüfung (Sicher ist sicher)
             if (user.email && user.email.toLowerCase().endsWith('@europagym.at')) {
-                // Alles gut, Login wird durch onAuthStateChanged behandelt
+                // Login OK
             } else {
                 await auth.signOut();
                 alert("Zugriff verweigert: Nur @europagym.at Adressen erlaubt.");
@@ -144,7 +140,6 @@ const app = {
         }
     },
 
-    // Wird aufgerufen, wenn Auth erfolgreich war
     handleLoginSuccess: (user) => {
         if (!user.email.toLowerCase().endsWith('@europagym.at')) {
             auth.signOut();
@@ -154,11 +149,9 @@ const app = {
         app.currentUser = user.email.toLowerCase();
         sessionStorage.setItem('userEmail', app.currentUser);
 
-        // UI Updates
         document.getElementById('auth-overlay').classList.add('hidden');
         document.getElementById('safety-banner').classList.remove('hidden');
         
-        // Name extrahieren (Vorname Nachname aus Email oder DisplayName)
         let displayName = user.displayName || app.currentUser.split('@')[0];
         document.getElementById('current-user').innerText = displayName;
         document.getElementById('user-initials').innerText = app.currentUser.charAt(0).toUpperCase();
@@ -167,9 +160,6 @@ const app = {
         if(app.data.orders.length > 0) app.checkVipStatus();
         app.showToast("Erfolgreich eingeloggt 🚀");
     },
-
-    // Diese alte Login-Funktion wird nicht mehr direkt aufgerufen
-    login: async (email) => { },
 
     logout: () => {
         sessionStorage.removeItem('userEmail');
@@ -205,7 +195,6 @@ const app = {
         const container = document.getElementById('feed-container');
         container.innerHTML = '';
         const liked = JSON.parse(localStorage.getItem('cupid_likes')) || [];
-        
         const vipUsers = app.getVipList();
 
         let posts = (app.data.posts || []).filter(p => p.approved);
@@ -221,18 +210,9 @@ const app = {
         posts.forEach(post => {
             const isLiked = liked.includes(post.id);
             const isVipPost = vipUsers.has(post.author);
-
-            const vipClasses = isVipPost 
-                ? 'border-yellow-500/50 shadow-[0_0_20px_rgba(234,179,8,0.15)] bg-yellow-500/5' 
-                : '';
-            
-            const vipBadge = isVipPost 
-                ? '<div class="text-[8px] font-black text-yellow-500 mb-2 flex items-center gap-1"><i class="fa-solid fa-crown"></i> VIP STATUS</div>' 
-                : '';
-            
-            const verifyLabel = isVipPost 
-                ? '<span class="text-[9px] font-bold text-yellow-500 uppercase">Verifiziert</span>'
-                : '<span class="text-[9px] font-bold text-gray-500 uppercase">Community</span>';
+            const vipClasses = isVipPost ? 'border-yellow-500/50 shadow-[0_0_20px_rgba(234,179,8,0.15)] bg-yellow-500/5' : '';
+            const vipBadge = isVipPost ? '<div class="text-[8px] font-black text-yellow-500 mb-2 flex items-center gap-1"><i class="fa-solid fa-crown"></i> VIP STATUS</div>' : '';
+            const verifyLabel = isVipPost ? '<span class="text-[9px] font-bold text-yellow-500 uppercase">Verifiziert</span>' : '<span class="text-[9px] font-bold text-gray-500 uppercase">Community</span>';
 
             container.innerHTML += `
                 <div class="masonry-item glass-card p-6 rounded-2xl break-inside-avoid mb-4 ${vipClasses}">
@@ -278,45 +258,40 @@ const app = {
         app.renderFeed(type);
     },
 
-    getDynamicPrice: () => {
-        const count = (app.data.orders || []).length;
-        if (count >= 400) return 2.00; 
-        if (count >= 300) return 2.50; 
-        if (count >= 200) return 3.00; 
-        if (count >= 100) return 3.50; 
-        return 4.00; 
-    },
-
+    // --- NEUE LOGIK: PROZENTUALE PHASEN ---
     getPhaseName: () => {
         const count = (app.data.orders || []).length;
-        if (count < 100) return "Phase 1: VIP RUN 🚀";
-        if (count < 200) return "Phase 2: -12,5% Rabatt 📉";
-        if (count < 300) return "Phase 3: -25% Rabatt 📉";
-        if (count < 400) return "Phase 4: -37,5% Rabatt 📉";
-        return "ZIEL: 50% RABATT 🔥";
+        if (count < 100) return "Start: 0% Rabatt";
+        if (count < 200) return "Phase 1: -5% Rabatt 📉";
+        if (count < 300) return "Phase 2: -10% Rabatt 📉";
+        if (count < 400) return "Phase 3: -15% Rabatt 📉";
+        return "ZIEL: 20% RABATT 🔥";
     },
 
+    // --- NEUE LOGIK: FIXE PREISBERECHNUNG ---
     updateTotal: () => {
         const selected = document.querySelector('input[name="product"]:checked');
         if (!selected) return;
 
-        let price = 0;
-        const type = selected.dataset.type;
+        // Preis aus der fixen Liste holen basierend auf dem value des Radio Buttons
+        let price = app.priceList[selected.value];
+        
+        // Fallback, falls value nicht in Liste ist
+        if (price === undefined) {
+             // Versuche data-price Attribut wenn vorhanden, sonst 0
+             price = parseFloat(selected.dataset.price) || 0;
+        }
 
-        if (type === 'basic') price = 0;
-        else if (type === 'fixed') price = parseFloat(selected.dataset.price);
-        else if (type === 'dynamic') price = app.getDynamicPrice();
-
+        // VIP Rabatt (bleibt bestehen für normale User-Incentivierung)
         if (app.isVip && price > 0) price = price * 0.85; 
 
         const displayPrice = price === 0 ? "Gratis" : price.toFixed(2).replace('.', ',') + '€';
         document.getElementById('order-total').innerText = (app.isVip ? "👑 " : "") + displayPrice;
         
-        let dynamicPrice = app.getDynamicPrice();
-        if(app.isVip) dynamicPrice = dynamicPrice * 0.85;
-        
-        document.getElementById('dynamic-combo-price').innerText = dynamicPrice.toFixed(2).replace('.', ',') + '€';
+        // Anzeige der Phase aktualisieren
         document.getElementById('price-phase-badge').innerText = app.getPhaseName();
+        
+        // VIP BUNDLE ANZEIGE ENTFERNT wie gewünscht
     },
 
     setVibe: (vibe) => {
@@ -341,12 +316,13 @@ const app = {
             return;
         }
 
-        let currentPrice = 0;
-        if (selectedBtn.dataset.type === 'dynamic') currentPrice = app.getDynamicPrice();
-        else if (selectedBtn.dataset.type === 'fixed') currentPrice = parseFloat(selectedBtn.dataset.price);
+        // Preisermittlung für die Datenbank
+        let currentPrice = app.priceList[selectedBtn.value];
+        if (currentPrice === undefined) currentPrice = 0; // Fallback
         
         const basePrice = currentPrice;
         
+        // VIP Rabatt anwenden
         if (app.isVip && currentPrice > 0) currentPrice *= 0.85;
 
         const submitBtn = document.querySelector('#order-form button[type="submit"]');
