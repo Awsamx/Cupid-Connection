@@ -28,8 +28,7 @@ const app = {
     isVip: false,
     listenersStarted: false,
 
-    // --- NEU: FIXE PREISLISTE ---
-    // Stelle sicher, dass die value="" Attribute in deiner HTML genau diesen Namen entsprechen!
+    // --- FIXE PREISLISTE ---
     priceList: {
         "Brief": 0.00,
         "Brief + Keks": 1.00,
@@ -103,7 +102,6 @@ const app = {
 
     getVipList: () => {
         const paidOrders = (app.data.orders || []).filter(o => {
-            // Logik: Wer Geld ausgegeben hat (Preis > 0), zählt als potenzieller VIP
             return (o.priceAtOrder > 0);
         });
 
@@ -180,14 +178,14 @@ const app = {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     },
 
-    // --- ÄNDERUNG 1: VIP STATUS AUCH IM HEADER ANZEIGEN ---
+    // --- ÄNDERUNG 1: VIP STATUS & HEADER BADGE ---
     checkVipStatus: () => {
         const vipUsers = app.getVipList();
         app.isVip = vipUsers.has(app.currentUser);
 
         // Elemente holen
-        const indicator = document.getElementById('vip-indicator'); // Falls du das irgendwo anders hast
-        const headerBadge = document.getElementById('vip-badge-header');
+        const indicator = document.getElementById('vip-indicator'); 
+        const headerBadge = document.getElementById('vip-badge-header'); // Korrekte ID aus HTML
 
         if (app.isVip) {
             if(indicator) indicator.classList.remove('hidden');
@@ -198,20 +196,16 @@ const app = {
         }
     },
 
-    // --- ÄNDERUNG 2: ADMIN ZUGANG IMMER ABFRAGEN ---
+    // --- ÄNDERUNG 2: ADMIN ZUGANG IMMER ERZWINGEN ---
     checkAdminAccess: () => {
-        // Wir prüfen NICHT mehr sessionStorage.getItem('adminUser'),
-        // sondern zwingen den User immer zur Eingabe.
-        
-        // Modal öffnen
+        // Kein Auto-Login mehr. Immer das Fenster zeigen.
         document.getElementById('admin-auth-modal').classList.remove('hidden');
         
-        // Optional: Admin-Formular zurücksetzen, damit Felder leer sind
-        document.getElementById('admin-user').value = "";
+        // E-Mail für dich vor-ausfüllen
+        document.getElementById('admin-user').value = "admin@europagym.at";
         document.getElementById('admin-pass').value = "";
     },
     
-    // (Optional) Update auch diese Funktion, damit das VIP Badge beim Laden der Stats aktualisiert wird
     updateStats: () => {
         const total = (app.data.orders || []).length;
         const bigCount = document.getElementById('total-count-big');
@@ -239,7 +233,7 @@ const app = {
 
         bar.style.width = percentage + '%';
         
-        // WICHTIG: Hier prüfen wir jedes Mal den VIP Status neu, wenn Daten reinkommen
+        // VIP Status prüfen, wenn Daten laden
         app.checkVipStatus(); 
         app.updateTotal(); 
     },
@@ -311,7 +305,6 @@ const app = {
         app.renderFeed(type);
     },
 
-    // --- NEUE LOGIK: PROZENTUALE PHASEN ---
     getPhaseName: () => {
         const count = (app.data.orders || []).length;
         if (count < 100) return "Start: 0% Rabatt";
@@ -321,30 +314,21 @@ const app = {
         return "ZIEL: 20% RABATT 🔥";
     },
 
-    // --- NEUE LOGIK: FIXE PREISBERECHNUNG ---
     updateTotal: () => {
         const selected = document.querySelector('input[name="product"]:checked');
         if (!selected) return;
 
-        // Preis aus der fixen Liste holen basierend auf dem value des Radio Buttons
         let price = app.priceList[selected.value];
-        
-        // Fallback, falls value nicht in Liste ist
         if (price === undefined) {
-             // Versuche data-price Attribut wenn vorhanden, sonst 0
              price = parseFloat(selected.dataset.price) || 0;
         }
 
-        // VIP Rabatt (bleibt bestehen für normale User-Incentivierung)
         if (app.isVip && price > 0) price = price * 0.85; 
 
         const displayPrice = price === 0 ? "Gratis" : price.toFixed(2).replace('.', ',') + '€';
         document.getElementById('order-total').innerText = (app.isVip ? "👑 " : "") + displayPrice;
         
-        // Anzeige der Phase aktualisieren
         document.getElementById('price-phase-badge').innerText = app.getPhaseName();
-        
-        // VIP BUNDLE ANZEIGE ENTFERNT wie gewünscht
     },
 
     setVibe: (vibe) => {
@@ -369,13 +353,11 @@ const app = {
             return;
         }
 
-        // Preisermittlung für die Datenbank
         let currentPrice = app.priceList[selectedBtn.value];
-        if (currentPrice === undefined) currentPrice = 0; // Fallback
+        if (currentPrice === undefined) currentPrice = 0;
         
         const basePrice = currentPrice;
         
-        // VIP Rabatt anwenden
         if (app.isVip && currentPrice > 0) currentPrice *= 0.85;
 
         const submitBtn = document.querySelector('#order-form button[type="submit"]');
@@ -466,14 +448,6 @@ const app = {
                 </div>
             `;
         }).join('') : '<div class="text-center text-gray-500 py-10">Keine Bestellungen.</div>';
-    },
-
-    checkAdminAccess: () => {
-        if (sessionStorage.getItem('adminUser') || auth.currentUser?.email) {
-            app.nav('admin');
-        } else {
-            document.getElementById('admin-auth-modal').classList.remove('hidden');
-        }
     },
 
     adminLogin: async () => {
@@ -597,31 +571,12 @@ const app = {
         else docRef.delete().catch(err => alert(err));
     },
 
-    updateStats: () => {
-        const total = (app.data.orders || []).length;
-        document.getElementById('total-count-big').innerText = total;
-
-        const maxGoal = 500; 
-        let percentage = (total / maxGoal) * 100;
-        if(percentage > 100) percentage = 100;
-
-        const bar = document.getElementById('progress-bar');
-        
-        // Logik: Gold (VIP) wenn < 100
-        if (total < 100) {
-            bar.classList.add('is-gold'); // GOLD MODUS AN
-            document.getElementById('total-count-big').classList.add('gold-text-effect');
-            document.getElementById('total-count-big').classList.remove('text-brand-accent');
-        } else {
-            bar.classList.remove('is-gold'); // ZURÜCK ZU NORMAL
-            document.getElementById('total-count-big').classList.remove('gold-text-effect');
-            document.getElementById('total-count-big').classList.add('text-brand-accent');
-        }
-
-        bar.style.width = percentage + '%';
-        
-        app.checkVipStatus(); 
-        app.updateTotal(); 
+    showToast: (msg) => {
+        const t = document.getElementById('toast');
+        if(!t) return;
+        document.getElementById('toast-msg').innerText = msg;
+        t.classList.remove('translate-x-[150%]');
+        setTimeout(() => t.classList.add('translate-x-[150%]'), 3000);
     },
 
     updateCountdown: () => {
@@ -632,14 +587,6 @@ const app = {
             document.getElementById('minutes').innerText = String(Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))).padStart(2, '0');
             document.getElementById('seconds').innerText = String(Math.floor((diff % (1000 * 60)) / 1000)).padStart(2, '0');
         }
-    },
-
-    showToast: (msg) => {
-        const t = document.getElementById('toast');
-        if(!t) return;
-        document.getElementById('toast-msg').innerText = msg;
-        t.classList.remove('translate-x-[150%]');
-        setTimeout(() => t.classList.add('translate-x-[150%]'), 3000);
     }
 };
 
