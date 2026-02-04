@@ -74,6 +74,7 @@ const app = {
         app.setVibe('classic');
     },
 
+    // --- HYBRID LOGIN: ERKENNT INSTAGRAM VS. NORMAL ---
     loginWithMicrosoft: async () => {
         const provider = new firebase.auth.OAuthProvider('microsoft.com');
         provider.setCustomParameters({
@@ -81,18 +82,43 @@ const app = {
             tenant: 'f7bb63a9-5ed7-4a21-b43a-3f684ec4938b' 
         });
 
+        // Prüfung: Sind wir in einem In-App Browser (Instagram, Facebook, TikTok)?
+        const ua = navigator.userAgent || navigator.vendor || window.opera;
+        const isInAppBrowser = (ua.indexOf("Instagram") > -1) || (ua.indexOf("FBAN") > -1) || (ua.indexOf("FBAV") > -1) || (ua.indexOf("TikTok") > -1);
+
         try {
-            // 1. Zwinge Firebase, den Login LOKAL zu speichern (hilft gegen "missing initial state")
-            await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-            
             document.getElementById('login-container').classList.add('hidden');
             document.getElementById('auth-loading').classList.remove('hidden');
 
-            // 2. Nutze Redirect statt Popup (Überlebenswichtig für Instagram/Safari)
-            await auth.signInWithRedirect(provider);
+            // Setze Persistence auf LOCAL (Wichtig für beide Methoden)
+            await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+
+            if (isInAppBrowser) {
+                // FALL A: Instagram/TikTok -> MUSS Redirect nutzen (Popups geblockt)
+                console.log("In-App Browser erkannt: Nutze Redirect");
+                await auth.signInWithRedirect(provider);
+            } else {
+                // FALL B: Safari/Chrome/Desktop -> Nutze Popup (Vermeidet den Microsoft POST-Fehler)
+                console.log("Standard Browser erkannt: Nutze Popup");
+                await auth.signInWithPopup(provider);
+                
+                // Hinweis: Bei Popup läuft der Code hier weiter, bei Redirect lädt die Seite neu.
+                // onAuthStateChanged in init() fängt den erfolgreichen Login ab.
+            }
+
         } catch (error) {
-            console.error("Login Fehler:", error);
-            alert("Login konnte nicht gestartet werden: " + error.message);
+            console.error("Login Start Fehler:", error);
+            
+            // Spezifische Fehlerbehandlung
+            if (error.code === 'auth/popup-closed-by-user') {
+                alert("Login abgebrochen. Bitte versuche es erneut.");
+            } else if (error.code === 'auth/popup-blocked') {
+                alert("Popup wurde blockiert. Bitte erlaube Popups für diese Seite oder öffne sie in Safari/Chrome direkt.");
+            } else {
+                alert("Login Fehler: " + error.message);
+            }
+
+            // UI Reset
             document.getElementById('login-container').classList.remove('hidden');
             document.getElementById('auth-loading').classList.add('hidden');
         }
@@ -178,6 +204,7 @@ const app = {
         const bar = document.getElementById('progress-bar');
         if (total < 100) bar.classList.add('is-gold'); else bar.classList.remove('is-gold');
         if(bar) bar.style.width = percentage + '%';
+        app.updateTotal();
     },
 
     logout: () => { sessionStorage.removeItem('userEmail'); auth.signOut().then(() => location.reload()); },
@@ -239,12 +266,22 @@ const app = {
         } catch (err) { alert(err.message); } finally { submitBtn.disabled = false; }
     },
 
+    getPhaseName: () => {
+        const count = app.data.totalCount || 0;
+        if (count < 100) return "Start: 0% Rabatt";
+        if (count < 200) return "Phase 1: -5% Rabatt 📉";
+        if (count < 300) return "Phase 2: -10% Rabatt 📉";
+        if (count < 400) return "Phase 3: -15% Rabatt 📉";
+        return "ZIEL: 20% RABATT 🔥";
+    },
+
     updateTotal: () => {
         const selected = document.querySelector('input[name="product"]:checked');
         if (!selected) return;
         let price = app.priceList[selected.value] || 0;
         if (app.isVip && price > 0) price = price * 0.85; 
         document.getElementById('order-total').innerText = (app.isVip ? "👑 " : "") + (price === 0 ? "Gratis" : price.toFixed(2).replace('.', ',') + '€');
+        document.getElementById('price-phase-badge').innerText = app.getPhaseName();
     },
 
     setVibe: (vibe) => {
