@@ -21,14 +21,14 @@ try {
 
 // --- 3. APP LOGIK ---
 const app = {
-    data: { posts: [], orders: [] },
+    data: { posts: [], orders: [], totalCount: 0 }, // Neu: totalCount separat
     currentUser: null,
     html5QrCode: null,
     activeOrderId: null,
     isVip: false,
     listenersStarted: false,
 
-    // --- FIXE PREISLISTE ---
+    // Fixe Preise
     priceList: {
         "Brief": 0.00,
         "Brief + Keks": 1.00,
@@ -49,9 +49,6 @@ const app = {
             }
         });
 
-        const adminUser = sessionStorage.getItem('adminUser');
-        if(adminUser) console.log("Admin Session aktiv");
-
         app.updateCountdown();
         setInterval(app.updateCountdown, 1000);
         app.setVibe('classic');
@@ -60,21 +57,33 @@ const app = {
     startDatabaseListeners: () => {
         if (app.listenersStarted) return;
         app.listenersStarted = true;
+        console.log("Starte Listener...");
 
-        console.log("Starte Datenbank-Verbindungen...");
-
+        // 1. Hype Wall (Für alle sichtbar)
         db.collection("posts").orderBy("timestamp", "desc").onSnapshot(snapshot => {
             app.data.posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             app.renderFeed();
             app.renderModQueue(); 
-        }, err => console.log("Post-Fehler:", err));
+        });
 
-        db.collection("orders").onSnapshot(snapshot => {
-            app.data.orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            app.updateStats(); 
+        // 2. MEINE Bestellungen (Nur eigene laden -> Sicherheit!)
+        db.collection("orders").where("sender", "==", app.currentUser).onSnapshot(snapshot => {
+            // Speichere meine Bestellungen separat oder filtere sie
+            // Hier nutzen wir app.data.orders nur für "Meine Bestellungen" Ansicht
+            const myOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            app.data.orders = myOrders; // Achtung: Als normaler User sind das NUR meine
             app.renderMyOrders();
-            app.renderOrders(); 
-        }, err => console.log("Order-Fehler:", err));
+            app.checkVipStatus();
+        });
+
+        // 3. GLOBALER ZÄHLER (Für Preisbremse)
+        // Liest aus metadata/stats statt alle Orders zu zählen
+        db.collection("metadata").doc("stats").onSnapshot(doc => {
+            if (doc.exists) {
+                app.data.totalCount = doc.data().count || 0;
+                app.updateStats();
+            }
+        });
         
         app.initPresence();
     },
@@ -92,7 +101,6 @@ const app = {
                 });
             }
         });
-
         rtdb.ref('/presence').on('value', (snapshot) => {
             const count = snapshot.numChildren() || 0;
             const indicator = document.getElementById('online-indicator'); 
@@ -101,49 +109,35 @@ const app = {
     },
 
     getVipList: () => {
-        const paidOrders = (app.data.orders || []).filter(o => {
-            return (o.priceAtOrder > 0);
-        });
-
-        const sorted = paidOrders.sort((a, b) => a.timestamp - b.timestamp);
-        return new Set(sorted.slice(0, 100).map(o => o.sender));
+        // Prüft lokal nur die eigenen Orders auf VIP
+        // (Für globale VIP-Anzeige im Feed müsste man separate Logik bauen, 
+        // aber für das eigene Badge reicht das hier)
+        const paidOrders = (app.data.orders || []).filter(o => o.priceAtOrder > 0);
+        return new Set(paidOrders.map(o => o.sender));
     },
 
     loginWithMicrosoft: async () => {
         const provider = new firebase.auth.OAuthProvider('microsoft.com');
-        provider.setCustomParameters({
-            prompt: 'select_account',
-            tenant: 'f7bb63a9-5ed7-4a21-b43a-3f684ec4938b' 
-        });
-
+        provider.setCustomParameters({ prompt: 'select_account', tenant: 'f7bb63a9-5ed7-4a21-b43a-3f684ec4938b' });
         try {
             document.getElementById('login-container').classList.add('hidden');
             document.getElementById('auth-loading').classList.remove('hidden');
-
             const result = await auth.signInWithPopup(provider);
             const user = result.user;
-            
-            if (user.email && user.email.toLowerCase().endsWith('@europagym.at')) {
-                // Login OK
-            } else {
+            if (!user.email.toLowerCase().endsWith('@europagym.at')) {
                 await auth.signOut();
-                alert("Zugriff verweigert: Nur @europagym.at Adressen erlaubt.");
+                alert("Nur @europagym.at erlaubt.");
                 location.reload();
             }
-
         } catch (error) {
-            console.error("Login Fehler:", error);
-            alert("Login fehlgeschlagen: " + error.message);
+            console.error(error);
+            alert("Login Fehler: " + error.message);
             location.reload();
         }
     },
 
     handleLoginSuccess: (user) => {
-        if (!user.email.toLowerCase().endsWith('@europagym.at')) {
-            auth.signOut();
-            return;
-        }
-
+        if (!user.email.toLowerCase().endsWith('@europagym.at')) { auth.signOut(); return; }
         app.currentUser = user.email.toLowerCase();
         sessionStorage.setItem('userEmail', app.currentUser);
 
@@ -155,15 +149,12 @@ const app = {
         document.getElementById('user-initials').innerText = app.currentUser.charAt(0).toUpperCase();
         document.getElementById('profile-email').innerText = app.currentUser;
         
-        if(app.data.orders.length > 0) app.checkVipStatus();
         app.showToast("Erfolgreich eingeloggt 🚀");
     },
 
     logout: () => {
         sessionStorage.removeItem('userEmail');
-        auth.signOut().then(() => {
-            location.reload();
-        });
+        auth.signOut().then(() => location.reload());
     },
 
     nav: (id) => {
@@ -178,14 +169,14 @@ const app = {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     },
 
-    // --- ÄNDERUNG 1: VIP STATUS & HEADER BADGE ---
+    // --- FIX: ID korrigiert ---
     checkVipStatus: () => {
-        const vipUsers = app.getVipList();
-        app.isVip = vipUsers.has(app.currentUser);
+        // Einfache Logik: Habe ich eine bezahlte Bestellung gemacht?
+        const hasPaid = (app.data.orders || []).some(o => o.priceAtOrder > 0);
+        app.isVip = hasPaid;
 
-        // Elemente holen
         const indicator = document.getElementById('vip-indicator'); 
-        const headerBadge = document.getElementById('vip-badge-header'); // Korrekte ID aus HTML
+        const headerBadge = document.getElementById('vip-badge-header'); 
 
         if (app.isVip) {
             if(indicator) indicator.classList.remove('hidden');
@@ -196,18 +187,56 @@ const app = {
         }
     },
 
-    // --- ÄNDERUNG 2: ADMIN ZUGANG IMMER ERZWINGEN ---
+    // --- FIX: Immer Passwort abfragen ---
     checkAdminAccess: () => {
-        // Kein Auto-Login mehr. Immer das Fenster zeigen.
+        // Kein Auto-Login mehr!
         document.getElementById('admin-auth-modal').classList.remove('hidden');
-        
-        // E-Mail für dich vor-ausfüllen
         document.getElementById('admin-user').value = "admin@europagym.at";
         document.getElementById('admin-pass').value = "";
     },
-    
+
+    // --- ADMIN: Extra Login ---
+    adminLogin: async () => {
+        const email = document.getElementById('admin-user').value;
+        const pass = document.getElementById('admin-pass').value;
+        try {
+            // Meldet den Microsoft-User ab und den Admin an
+            await auth.signInWithEmailAndPassword(email, pass);
+            sessionStorage.setItem('adminUser', email);
+            
+            document.getElementById('admin-auth-modal').classList.add('hidden');
+            app.nav('admin');
+            app.showToast("Willkommen Admin");
+
+            // WICHTIG: Als Admin laden wir jetzt ALLE Bestellungen
+            db.collection("orders").onSnapshot(snapshot => {
+                // Hier überschreiben wir die Liste mit ALLEN Daten
+                app.data.orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                app.renderOrders(); // Admin Tabelle rendern
+            });
+
+        } catch (error) {
+            console.error("Login Error:", error);
+            alert("Login fehlgeschlagen.");
+        }
+    },
+
+    adminTab: (tab) => {
+        document.querySelectorAll('.admin-view').forEach(v => v.classList.add('hidden'));
+        document.getElementById('admin-' + tab).classList.remove('hidden');
+        document.querySelectorAll('.admin-tab-btn').forEach(b => {
+            b.classList.remove('bg-white/10', 'text-white'); b.classList.add('text-gray-500');
+        });
+        const btn = document.getElementById('t-' + tab);
+        if(btn) { btn.classList.add('bg-white/10', 'text-white'); btn.classList.remove('text-gray-500'); }
+        if(tab === 'mod') app.renderModQueue();
+        if(tab === 'orders') app.renderOrders();
+    },
+
     updateStats: () => {
-        const total = (app.data.orders || []).length;
+        // Nutzt jetzt den globalen Zähler
+        const total = app.data.totalCount || 0;
+        
         const bigCount = document.getElementById('total-count-big');
         if(bigCount) bigCount.innerText = total;
 
@@ -230,12 +259,112 @@ const app = {
                 bigCount.classList.add('text-brand-accent');
             }
         }
-
         bar.style.width = percentage + '%';
         
-        // VIP Status prüfen, wenn Daten laden
         app.checkVipStatus(); 
         app.updateTotal(); 
+    },
+
+    submitOrder: async () => {
+        const id = 'ORD-' + Math.floor(Math.random() * 90000 + 10000);
+        const recipient = document.getElementById('order-recipient').value;
+        const grade = document.getElementById('order-grade').value;
+        const room = document.getElementById('order-room').value;
+        const message = document.getElementById('order-message').value;
+        const selectedBtn = document.querySelector('input[name="product"]:checked');
+        const fileInput = document.getElementById('order-image');
+
+        if (!recipient || !grade || !room || !message) { alert("Bitte alle Felder ausfüllen."); return; }
+
+        let currentPrice = app.priceList[selectedBtn.value];
+        if (currentPrice === undefined) currentPrice = 0;
+        const basePrice = currentPrice;
+        if (app.isVip && currentPrice > 0) currentPrice *= 0.85;
+
+        const submitBtn = document.querySelector('#order-form button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.innerText = "Sende Daten...";
+
+        try {
+            let imageUrl = null;
+            if (app.isVip && fileInput && fileInput.files.length > 0) {
+                submitBtn.innerText = "Lade Bild hoch...";
+                const file = fileInput.files[0];
+                const storageRef = storage.ref(`vip_uploads/${id}_${file.name}`);
+                await storageRef.put(file);
+                imageUrl = await storageRef.getDownloadURL();
+            }
+
+            const newOrder = {
+                recipient: recipient, grade: grade, room: room,
+                product: selectedBtn.value, message: message, vibe: document.getElementById('order-vibe').value,
+                sender: app.currentUser, status: 'Bestellt', 
+                isVip: app.isVip, priceAtOrder: basePrice, 
+                timestamp: Date.now(), vipImage: imageUrl
+            };
+
+            // Bestellung speichern
+            await db.collection("orders").doc(id).set(newOrder);
+            
+            // --- FIX: Zähler erhöhen ---
+            db.collection("metadata").doc("stats").update({
+                count: firebase.firestore.FieldValue.increment(1)
+            }).catch(e => console.log("Zähler-Fehler (evtl. noch nicht erstellt):", e));
+
+            const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${id}&color=7c3aed&bgcolor=ffffff`;
+            document.getElementById('qr-image').src = qrUrl;
+            document.getElementById('qr-order-id').innerText = id;
+            
+            const vipBadge = app.isVip ? '<span class="ml-2 bg-[#fbbf24] text-black text-[9px] px-1 rounded font-bold">VIP</span>' : '';
+            const priceText = currentPrice === 0 ? "Kostenlos" : currentPrice.toFixed(2).replace('.', ',') + "€";
+
+            document.getElementById('qr-summary').innerHTML = `
+                <div class="flex justify-between"><span>Produkt:</span> <span class="text-white font-bold">${newOrder.product}</span></div>
+                <div class="flex justify-between"><span>An:</span> <span class="text-white">${newOrder.recipient}</span></div>
+                ${imageUrl ? '<div class="flex justify-between text-yellow-500 text-[10px]"><span>+ Bild Upload</span> <i class="fa-solid fa-check"></i></div>' : ''}
+                <div class="flex justify-between mt-2 pt-2 border-t border-white/10 font-bold"><span>Zu zahlen:</span> <span class="text-brand-accent text-lg">${priceText} ${vipBadge}</span></div>
+            `;
+
+            document.getElementById('qr-modal').classList.remove('hidden');
+            document.getElementById('order-form').reset();
+            app.updateTotal(); 
+
+        } catch (err) {
+            console.error(err);
+            alert("Fehler beim Bestellen: " + err.message);
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.innerText = "Bestellen & Code generieren";
+        }
+    },
+
+    // --- Helpers & Renderers ---
+    getPhaseName: () => {
+        const count = app.data.totalCount || 0;
+        if (count < 100) return "Start: 0% Rabatt";
+        if (count < 200) return "Phase 1: -5% Rabatt 📉";
+        if (count < 300) return "Phase 2: -10% Rabatt 📉";
+        if (count < 400) return "Phase 3: -15% Rabatt 📉";
+        return "ZIEL: 20% RABATT 🔥";
+    },
+
+    updateTotal: () => {
+        const selected = document.querySelector('input[name="product"]:checked');
+        if (!selected) return;
+        let price = app.priceList[selected.value];
+        if (price === undefined) price = parseFloat(selected.dataset.price) || 0;
+        if (app.isVip && price > 0) price = price * 0.85; 
+        const displayPrice = price === 0 ? "Gratis" : price.toFixed(2).replace('.', ',') + '€';
+        document.getElementById('order-total').innerText = (app.isVip ? "👑 " : "") + displayPrice;
+        document.getElementById('price-phase-badge').innerText = app.getPhaseName();
+    },
+
+    setVibe: (vibe) => {
+        document.getElementById('order-vibe').value = vibe;
+        document.querySelectorAll('.vibe-btn').forEach(btn => {
+            if(btn.dataset.vibe === vibe) btn.classList.replace('text-gray-400', 'text-brand-accent');
+            else btn.classList.replace('text-brand-accent', 'text-gray-400');
+        });
     },
 
     renderFeed: (filter = 'all') => {
@@ -243,24 +372,17 @@ const app = {
         container.innerHTML = '';
         const liked = JSON.parse(localStorage.getItem('cupid_likes')) || [];
         const vipUsers = app.getVipList();
-
         let posts = (app.data.posts || []).filter(p => p.approved);
-        
         if(filter === 'new') posts.sort((a,b) => b.timestamp - a.timestamp);
         else posts.sort((a,b) => b.hearts - a.hearts); 
-
-        if (posts.length === 0) {
-            container.innerHTML = '<p class="text-gray-500 col-span-full text-center py-10">Keine Posts.</p>';
-            return;
-        }
-
+        if (posts.length === 0) { container.innerHTML = '<p class="text-gray-500 col-span-full text-center py-10">Keine Posts.</p>'; return; }
         posts.forEach(post => {
             const isLiked = liked.includes(post.id);
-            const isVipPost = vipUsers.has(post.author);
+            // Für globale VIPs im Feed bräuchte man eine User-Liste, hier vereinfacht:
+            const isVipPost = vipUsers.has(post.author); 
             const vipClasses = isVipPost ? 'border-yellow-500/50 shadow-[0_0_20px_rgba(234,179,8,0.15)] bg-yellow-500/5' : '';
             const vipBadge = isVipPost ? '<div class="text-[8px] font-black text-yellow-500 mb-2 flex items-center gap-1"><i class="fa-solid fa-crown"></i> VIP STATUS</div>' : '';
             const verifyLabel = isVipPost ? '<span class="text-[9px] font-bold text-yellow-500 uppercase">Verifiziert</span>' : '<span class="text-[9px] font-bold text-gray-500 uppercase">Community</span>';
-
             container.innerHTML += `
                 <div class="masonry-item glass-card p-6 rounded-2xl break-inside-avoid mb-4 ${vipClasses}">
                     ${vipBadge}
@@ -287,11 +409,7 @@ const app = {
         const txt = document.getElementById('new-post-content').value;
         if(!txt.trim()) return;
         db.collection("posts").add({
-            text: txt,
-            hearts: 0,
-            approved: false,
-            timestamp: Date.now(),
-            author: app.currentUser 
+            text: txt, hearts: 0, approved: false, timestamp: Date.now(), author: app.currentUser 
         }).then(() => {
             document.getElementById('new-post-content').value = '';
             document.getElementById('post-modal').classList.add('hidden');
@@ -305,123 +423,10 @@ const app = {
         app.renderFeed(type);
     },
 
-    getPhaseName: () => {
-        const count = (app.data.orders || []).length;
-        if (count < 100) return "Start: 0% Rabatt";
-        if (count < 200) return "Phase 1: -5% Rabatt 📉";
-        if (count < 300) return "Phase 2: -10% Rabatt 📉";
-        if (count < 400) return "Phase 3: -15% Rabatt 📉";
-        return "ZIEL: 20% RABATT 🔥";
-    },
-
-    updateTotal: () => {
-        const selected = document.querySelector('input[name="product"]:checked');
-        if (!selected) return;
-
-        let price = app.priceList[selected.value];
-        if (price === undefined) {
-             price = parseFloat(selected.dataset.price) || 0;
-        }
-
-        if (app.isVip && price > 0) price = price * 0.85; 
-
-        const displayPrice = price === 0 ? "Gratis" : price.toFixed(2).replace('.', ',') + '€';
-        document.getElementById('order-total').innerText = (app.isVip ? "👑 " : "") + displayPrice;
-        
-        document.getElementById('price-phase-badge').innerText = app.getPhaseName();
-    },
-
-    setVibe: (vibe) => {
-        document.getElementById('order-vibe').value = vibe;
-        document.querySelectorAll('.vibe-btn').forEach(btn => {
-            if(btn.dataset.vibe === vibe) btn.classList.replace('text-gray-400', 'text-brand-accent');
-            else btn.classList.replace('text-brand-accent', 'text-gray-400');
-        });
-    },
-
-    submitOrder: async () => {
-        const id = 'ORD-' + Math.floor(Math.random() * 90000 + 10000);
-        const recipient = document.getElementById('order-recipient').value;
-        const grade = document.getElementById('order-grade').value;
-        const room = document.getElementById('order-room').value;
-        const message = document.getElementById('order-message').value;
-        const selectedBtn = document.querySelector('input[name="product"]:checked');
-        const fileInput = document.getElementById('order-image');
-
-        if (!recipient || !grade || !room || !message) {
-            alert("Bitte alle Felder ausfüllen.");
-            return;
-        }
-
-        let currentPrice = app.priceList[selectedBtn.value];
-        if (currentPrice === undefined) currentPrice = 0;
-        
-        const basePrice = currentPrice;
-        
-        if (app.isVip && currentPrice > 0) currentPrice *= 0.85;
-
-        const submitBtn = document.querySelector('#order-form button[type="submit"]');
-        const originalText = submitBtn.innerText;
-        submitBtn.disabled = true;
-        submitBtn.innerText = "Sende Daten...";
-
-        try {
-            let imageUrl = null;
-            if (app.isVip && fileInput && fileInput.files.length > 0) {
-                submitBtn.innerText = "Lade Bild hoch...";
-                const file = fileInput.files[0];
-                const storageRef = storage.ref(`vip_uploads/${id}_${file.name}`);
-                await storageRef.put(file);
-                imageUrl = await storageRef.getDownloadURL();
-            }
-
-            const newOrder = {
-                recipient: recipient,
-                grade: grade,
-                room: room,
-                product: selectedBtn.value,
-                message: message,
-                vibe: document.getElementById('order-vibe').value,
-                sender: app.currentUser,
-                status: 'Bestellt', 
-                isVip: app.isVip, 
-                priceAtOrder: basePrice, 
-                timestamp: Date.now(),
-                vipImage: imageUrl
-            };
-
-            await db.collection("orders").doc(id).set(newOrder);
-
-            const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${id}&color=7c3aed&bgcolor=ffffff`;
-            document.getElementById('qr-image').src = qrUrl;
-            document.getElementById('qr-order-id').innerText = id;
-            
-            const vipBadge = app.isVip ? '<span class="ml-2 bg-[#fbbf24] text-black text-[9px] px-1 rounded font-bold">VIP</span>' : '';
-            const priceText = currentPrice === 0 ? "Kostenlos" : currentPrice.toFixed(2).replace('.', ',') + "€";
-
-            document.getElementById('qr-summary').innerHTML = `
-                <div class="flex justify-between"><span>Produkt:</span> <span class="text-white font-bold">${newOrder.product}</span></div>
-                <div class="flex justify-between"><span>An:</span> <span class="text-white">${newOrder.recipient}</span></div>
-                ${imageUrl ? '<div class="flex justify-between text-yellow-500 text-[10px]"><span>+ Bild Upload</span> <i class="fa-solid fa-check"></i></div>' : ''}
-                <div class="flex justify-between mt-2 pt-2 border-t border-white/10 font-bold"><span>Zu zahlen:</span> <span class="text-brand-accent text-lg">${priceText} ${vipBadge}</span></div>
-            `;
-
-            document.getElementById('qr-modal').classList.remove('hidden');
-            document.getElementById('order-form').reset();
-            app.updateTotal(); 
-
-        } catch (err) {
-            console.error(err);
-            alert("Fehler beim Bestellen: " + err.message);
-        } finally {
-            submitBtn.disabled = false;
-            submitBtn.innerText = originalText;
-        }
-    },
-
     renderMyOrders: () => {
         const list = document.getElementById('my-orders-list');
-        const mine = (app.data.orders || []).filter(o => o.sender === app.currentUser).sort((a,b) => b.timestamp - a.timestamp);
+        // Hier sind app.data.orders bereits gefiltert
+        const mine = (app.data.orders || []).sort((a,b) => b.timestamp - a.timestamp);
         const steps = ['Bestellt', 'Bezahlt', 'In Zubereitung', 'In Zustellung', 'Geliefert'];
 
         list.innerHTML = mine.length ? mine.map(o => {
@@ -429,7 +434,6 @@ const app = {
             if(currentIdx === -1) currentIdx = 0;
             const progress = (currentIdx / (steps.length - 1)) * 100;
             const vipTag = o.isVip ? '<span class="text-[9px] bg-yellow-500/20 text-yellow-500 border border-yellow-500/50 px-1 rounded ml-2">VIP</span>' : '';
-
             return `
                 <div class="glass-card p-6 rounded-[2rem] mb-4 relative overflow-hidden ${o.isVip ? 'border border-yellow-500/20' : ''}">
                     <div class="flex justify-between items-start mb-6">
@@ -450,32 +454,43 @@ const app = {
         }).join('') : '<div class="text-center text-gray-500 py-10">Keine Bestellungen.</div>';
     },
 
-    adminLogin: async () => {
-        const email = document.getElementById('admin-user').value;
-        const pass = document.getElementById('admin-pass').value;
-        try {
-            const userCredential = await auth.signInWithEmailAndPassword(email, pass);
-            sessionStorage.setItem('adminUser', userCredential.user.email);
-            document.getElementById('admin-auth-modal').classList.add('hidden');
-            app.nav('admin');
-            app.showToast("Willkommen Admin");
-        } catch (error) {
-            console.error("Login Error:", error);
-            alert("Login fehlgeschlagen.");
-        }
+    renderOrders: () => {
+        const list = document.getElementById('orders-list');
+        const sortedOrders = (app.data.orders || []).slice().sort((a,b) => {
+            if(a.isVip && !b.isVip) return 1; if(!a.isVip && b.isVip) return -1;
+            return a.timestamp - b.timestamp;
+        });
+        list.innerHTML = sortedOrders.reverse().map(o => `
+            <div class="glass-card p-4 rounded-xl text-xs space-y-2 ${o.status === 'Geliefert' ? 'opacity-50' : 'bg-black/40'} ${o.isVip ? 'vip-order-highlight' : ''}">
+                <div class="flex justify-between font-bold">
+                    <span class="${o.isVip ? 'text-yellow-500' : 'text-brand-accent'} font-mono">${o.id} ${o.isVip ? '👑' : ''}</span>
+                    <span class="${o.status === 'Bezahlt' ? 'text-green-400' : 'text-yellow-500'} uppercase">${o.status}</span>
+                </div>
+                <div class="text-white font-bold">${o.product} für ${o.recipient}</div>
+                ${o.vipImage ? '<div class="text-[9px] text-yellow-500"><i class="fa-solid fa-image"></i> Bild liegt bei</div>' : ''}
+                <button onclick="app.showOrderDetails('${o.id}')" class="w-full mt-2 py-2 bg-white/5 hover:bg-white/10 rounded font-bold">Öffnen</button>
+            </div>
+        `).join('') || '<p class="text-center text-gray-500">Keine Daten.</p>';
     },
 
-    adminTab: (tab) => {
-        document.querySelectorAll('.admin-view').forEach(v => v.classList.add('hidden'));
-        document.getElementById('admin-' + tab).classList.remove('hidden');
-        document.querySelectorAll('.admin-tab-btn').forEach(b => {
-            b.classList.remove('bg-white/10', 'text-white');
-            b.classList.add('text-gray-500');
-        });
-        const btn = document.getElementById('t-' + tab);
-        if(btn) { btn.classList.add('bg-white/10', 'text-white'); btn.classList.remove('text-gray-500'); }
-        if(tab === 'mod') app.renderModQueue();
-        if(tab === 'orders') app.renderOrders();
+    renderModQueue: () => {
+        const q = document.getElementById('mod-queue');
+        const pending = (app.data.posts || []).filter(p => !p.approved);
+        q.innerHTML = pending.length ? pending.map(p => `
+            <div class="glass-card p-4 rounded-2xl flex justify-between items-center bg-black/40">
+                <div class="w-2/3"><div class="text-[10px] text-gray-500 uppercase font-bold mb-1">${p.author}</div><p class="text-xs text-gray-300">"${p.text}"</p></div>
+                <div class="flex gap-2">
+                    <button onclick="app.modAction('${p.id}', true)" class="w-10 h-10 rounded-xl bg-green-500/20 text-green-500"><i class="fa-solid fa-check"></i></button>
+                    <button onclick="app.modAction('${p.id}', false)" class="w-10 h-10 rounded-xl bg-red-500/20 text-red-500"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            </div>
+        `).join('') : '<p class="text-center text-gray-500 italic">Queue leer.</p>';
+    },
+
+    modAction: (id, approve) => {
+        const docRef = db.collection("posts").doc(id);
+        if(approve) docRef.update({ approved: true }).catch(err => alert(err));
+        else docRef.delete().catch(err => alert(err));
     },
 
     startScanner: () => {
@@ -493,10 +508,9 @@ const app = {
 
     showOrderDetails: (id) => {
         const order = app.data.orders.find(o => o.id === id);
-        if (!order) return alert("Bestellung nicht gefunden!");
+        if (!order) return alert("Bestellung nicht gefunden (oder noch nicht geladen)!");
         app.activeOrderId = id;
         const modal = document.querySelector('#active-order-view .glass-card');
-        
         if (order.isVip) {
             modal.classList.add('vip-frame'); 
             document.getElementById('det-id').innerHTML = `${order.id} <span class="ml-2 text-yellow-500 text-xs border border-yellow-500 px-1 rounded bg-yellow-500/10">VIP</span>`;
@@ -504,12 +518,10 @@ const app = {
             modal.classList.remove('vip-frame');
             document.getElementById('det-id').innerText = order.id;
         }
-
         document.getElementById('det-recipient').innerText = order.recipient;
         document.getElementById('det-room').innerText = `${order.room} (${order.grade})`;
         const priceDisplay = order.priceAtOrder !== undefined ? ` (${order.priceAtOrder.toFixed(2)}€)` : '';
         document.getElementById('det-product').innerText = order.product + priceDisplay;
-        
         let msgHtml = `"${order.message}"`;
         if (order.vipImage) msgHtml += `<div class="mt-3"><img src="${order.vipImage}" class="rounded-xl w-full max-h-40 object-cover border border-yellow-500/50"></div>`;
         document.getElementById('det-message').innerHTML = msgHtml;
@@ -523,52 +535,6 @@ const app = {
             app.showToast("Status: " + newStatus);
             document.getElementById('active-order-view').classList.add('hidden');
         }).catch(err => alert("Fehler: " + err));
-    },
-
-    renderOrders: () => {
-        const list = document.getElementById('orders-list');
-        const sortedOrders = (app.data.orders || []).slice().sort((a,b) => {
-            if(a.isVip && !b.isVip) return 1; 
-            if(!a.isVip && b.isVip) return -1;
-            return a.timestamp - b.timestamp;
-        });
-
-        list.innerHTML = sortedOrders.reverse().map(o => `
-            <div class="glass-card p-4 rounded-xl text-xs space-y-2 ${o.status === 'Geliefert' ? 'opacity-50' : 'bg-black/40'} ${o.isVip ? 'vip-order-highlight' : ''}">
-                <div class="flex justify-between font-bold">
-                    <span class="${o.isVip ? 'text-yellow-500' : 'text-brand-accent'} font-mono">
-                        ${o.id} ${o.isVip ? '👑' : ''}
-                    </span>
-                    <span class="${o.status === 'Bezahlt' ? 'text-green-400' : 'text-yellow-500'} uppercase">${o.status}</span>
-                </div>
-                <div class="text-white font-bold">${o.product} für ${o.recipient}</div>
-                ${o.vipImage ? '<div class="text-[9px] text-yellow-500"><i class="fa-solid fa-image"></i> Bild liegt bei</div>' : ''}
-                <button onclick="app.showOrderDetails('${o.id}')" class="w-full mt-2 py-2 bg-white/5 hover:bg-white/10 rounded font-bold">Öffnen</button>
-            </div>
-        `).join('') || '<p class="text-center text-gray-500">Keine Daten.</p>';
-    },
-
-    renderModQueue: () => {
-        const q = document.getElementById('mod-queue');
-        const pending = (app.data.posts || []).filter(p => !p.approved);
-        q.innerHTML = pending.length ? pending.map(p => `
-            <div class="glass-card p-4 rounded-2xl flex justify-between items-center bg-black/40">
-                <div class="w-2/3">
-                    <div class="text-[10px] text-gray-500 uppercase font-bold mb-1">${p.author}</div>
-                    <p class="text-xs text-gray-300">"${p.text}"</p>
-                </div>
-                <div class="flex gap-2">
-                    <button onclick="app.modAction('${p.id}', true)" class="w-10 h-10 rounded-xl bg-green-500/20 text-green-500"><i class="fa-solid fa-check"></i></button>
-                    <button onclick="app.modAction('${p.id}', false)" class="w-10 h-10 rounded-xl bg-red-500/20 text-red-500"><i class="fa-solid fa-xmark"></i></button>
-                </div>
-            </div>
-        `).join('') : '<p class="text-center text-gray-500 italic">Queue leer.</p>';
-    },
-
-    modAction: (id, approve) => {
-        const docRef = db.collection("posts").doc(id);
-        if(approve) docRef.update({ approved: true }).catch(err => alert(err));
-        else docRef.delete().catch(err => alert(err));
     },
 
     showToast: (msg) => {
