@@ -153,22 +153,22 @@
                         <div class="flex flex-col items-center" style="margin-left: 20%">
                             <div class="h-full w-[1px] bg-white/10 absolute top-0"></div>
                             <span class="mt-14">100</span>
-                            <span class="text-brand-accent">-0,50€</span>
+                            <span class="text-brand-accent">-5%</span>
                         </div>
                         <div class="flex flex-col items-center" style="margin-left: 0%">
                             <div class="h-full w-[1px] bg-white/10 absolute top-0"></div>
                             <span class="mt-14">200</span>
-                            <span class="text-brand-accent">-1,00€</span>
+                            <span class="text-brand-accent">-10%</span>
                         </div>
                         <div class="flex flex-col items-center" style="margin-right: 0%">
                             <div class="h-full w-[1px] bg-white/10 absolute top-0"></div>
                             <span class="mt-14">300</span>
-                            <span class="text-brand-accent">-1,50€</span>
+                            <span class="text-brand-accent">-15%</span>
                         </div>
                         <div class="flex flex-col items-center" style="margin-right: 0%">
                             <div class="h-full w-[1px] bg-white/10 absolute top-0"></div>
                             <span class="mt-14">400</span>
-                            <span class="text-brand-accent">-2,00€</span>
+                            <span class="text-brand-accent">-20%</span>
                         </div>
                     </div>
                 </div>
@@ -219,8 +219,8 @@
                             <option value="">Stufe...</option>
                             <option value="1">Klasse 1</option><option value="2">Klasse 2</option>
                             <option value="3">Klasse 3</option><option value="4">Klasse 4</option>
-							<option value="4">Klasse 5</option><option value="5">Klasse 6</option>
-							<option value="7">Klasse 7</option><option value="8">Klasse 8</option>
+                            <option value="4">Klasse 5</option><option value="5">Klasse 6</option>
+                            <option value="7">Klasse 7</option><option value="8">Klasse 8</option>
                             <option value="Lehrer">Lehrer</option>
                         </select>
                         <input type="text" id="order-room" placeholder="Raum (z.B. 7L)" class="input-glass rounded-xl p-4" required>
@@ -229,36 +229,70 @@
 
                 <div class="glass-card p-8 rounded-[2rem] space-y-4">
                     <div class="flex justify-between items-center mb-2">
-                        <h3 class="text-sm font-bold text-white uppercase tracking-widest">2. Wähle dein Item</h3>
+                        <h3 class="text-sm font-bold text-white uppercase tracking-widest">2. Wähle dein Geschenk</h3>
                         <div id="price-phase-badge" class="text-[10px] font-bold px-2 py-1 rounded bg-brand-primary/20 border border-brand-primary text-brand-primary uppercase animate-pulse">
                             Lade Preise...
                         </div>
                     </div>
 
-                    <label class="flex items-center p-4 border border-white/5 rounded-2xl cursor-pointer hover:bg-white/5 transition bg-black/20" onclick="app.updateTotal()">
-                        <input type="radio" name="product" value="Brief" data-type="basic" class="mr-4 accent-brand-primary" checked>
-                        <div class="flex-1 font-bold">Nur Brief <span class="text-xs font-normal opacity-50 block"></span></div>
-                        <div class="text-sm font-mono opacity-50">Gratis</div>
-                    </label>
+                    <div class="space-y-3">
+                        <label class="cursor-pointer">
+                            <input type="radio" name="product" value="Brief" class="peer sr-only" onchange="app.updateTotal()" checked>
+                            <div class="glass-card p-4 rounded-xl peer-checked:bg-brand-primary/20 peer-checked:border-brand-primary border border-transparent transition flex justify-between items-center">
+                                <span class="text-white font-bold">Nur Brief ✉️</span>
+                                <span class="text-brand-accent">Gratis</span>
+                            </div>
+                        </label>
 
-                    <label class="flex items-center p-4 border border-white/5 rounded-2xl cursor-pointer hover:bg-white/5 transition bg-black/20" onclick="app.updateTotal()">
-                        <input type="radio" name="product" value="Keks" data-type="fixed" data-price="2.00" class="mr-4 accent-brand-primary">
-                        <div class="flex-1 font-bold">Keks Combo <span class="text-xs font-normal opacity-50 block">Brief + Bio Schoko-Keks</span></div>
-                        <div class="text-sm font-mono text-brand-primary">2,00€</div>
-                    </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="product" value="Brief + Keks" class="peer sr-only" onchange="app.updateTotal()">
+                            <div class="glass-card p-4 rounded-xl peer-checked:bg-brand-primary/20 peer-checked:border-brand-primary border border-transparent transition flex justify-between items-center">
+                                <span class="text-white font-bold">Brief + Keks 🍪</span>
+                                <span class="text-brand-accent">1,00€</span>
+                            </div>
+                        </label>
 
-                    <label class="flex items-center p-4 border border-white/5 rounded-2xl cursor-pointer hover:bg-white/5 transition bg-black/20" onclick="app.updateTotal()">
-                        <input type="radio" name="product" value="Rose" data-type="fixed" data-price="3.00" class="mr-4 accent-brand-primary">
-                        <div class="flex-1 font-bold">Rosen Combo <span class="text-xs font-normal opacity-50 block">Brief + Echte Rote Rose</span></div>
-                        <div class="text-sm font-mono text-brand-primary">3,00€</div>
-                    </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="product" value="Brief + Hariborose" class="peer sr-only" onchange="app.updateTotal()">
+                            <div class="glass-card p-4 rounded-xl peer-checked:bg-brand-primary/20 peer-checked:border-brand-primary border border-transparent transition flex justify-between items-center">
+                                <span class="text-white font-bold">Brief + Hariborose 🍬</span>
+                                <span class="text-brand-accent">1,00€</span>
+                            </div>
+                        </label>
 
-                    <label class="flex items-center p-4 border border-brand-secondary/30 rounded-2xl cursor-pointer hover:bg-brand-secondary/10 transition bg-gradient-to-r from-brand-secondary/10 to-transparent relative overflow-hidden" onclick="app.updateTotal()">
-                        <div class="absolute top-0 right-0 bg-brand-secondary text-[9px] font-bold px-2 py-0.5 rounded-bl-lg text-white">BESTSELLER</div>
-                        <input type="radio" name="product" value="Full Combo" data-type="dynamic" class="mr-4 accent-brand-secondary">
-                        <div class="flex-1 font-bold text-white">Alles Drin <span class="text-xs font-normal text-gray-400 block">Brief + Rose + Keks + VIP Chance</span></div>
-                        <div class="text-sm font-mono text-brand-secondary font-bold" id="dynamic-combo-price">4,00€</div>
-                    </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="product" value="Brief + Papierrose" class="peer sr-only" onchange="app.updateTotal()">
+                            <div class="glass-card p-4 rounded-xl peer-checked:bg-brand-primary/20 peer-checked:border-brand-primary border border-transparent transition flex justify-between items-center">
+                                <span class="text-white font-bold">Brief + Papierrose 🌹</span>
+                                <span class="text-brand-accent">2,00€</span>
+                            </div>
+                        </label>
+
+                        <label class="cursor-pointer">
+                            <input type="radio" name="product" value="Brief + Hariborose + Keks" class="peer sr-only" onchange="app.updateTotal()">
+                            <div class="glass-card p-4 rounded-xl peer-checked:bg-brand-primary/20 peer-checked:border-brand-primary border border-transparent transition flex justify-between items-center">
+                                <span class="text-white font-bold">Brief + Haribo + Keks 🍬🍪</span>
+                                <span class="text-brand-accent">2,00€</span>
+                            </div>
+                        </label>
+
+                        <label class="cursor-pointer">
+                            <input type="radio" name="product" value="Brief + Papierrose + Keks" class="peer sr-only" onchange="app.updateTotal()">
+                            <div class="glass-card p-4 rounded-xl peer-checked:bg-brand-primary/20 peer-checked:border-brand-primary border border-transparent transition flex justify-between items-center">
+                                <span class="text-white font-bold">Brief + Rose + Keks 🌹🍪</span>
+                                <span class="text-brand-accent">2,50€</span>
+                            </div>
+                        </label>
+
+                        <label class="cursor-pointer">
+                            <input type="radio" name="product" value="Brief + Keks + Hariborose + Papierrose" class="peer sr-only" onchange="app.updateTotal()">
+                            <div class="glass-card p-4 rounded-xl peer-checked:bg-brand-primary/20 peer-checked:border-brand-primary border border-transparent transition flex justify-between items-center relative overflow-hidden">
+                                <div class="absolute inset-0 bg-gradient-to-r from-purple-500/10 to-pink-500/10 opacity-0 peer-checked:opacity-100 transition"></div>
+                                <span class="text-white font-bold relative z-10">ALLES (Full Combo) 🤯</span>
+                                <span class="text-brand-accent relative z-10">3,50€</span>
+                            </div>
+                        </label>
+                    </div>
                 </div>
 
                 <div class="glass-card p-8 rounded-[2rem] space-y-4">
