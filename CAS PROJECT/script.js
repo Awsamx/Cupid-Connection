@@ -43,23 +43,24 @@ const app = {
         document.getElementById('auth-loading').classList.remove('hidden');
         document.getElementById('login-container').classList.add('hidden');
 
-        // 1. PERSISTENCE SOFORT SETZEN (Wichtig für Instagram & Safari)
-        try {
-            await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-        } catch(e) { console.error("Persistence Warning:", e); }
+        // FIX 1: Persistence SOFORT setzen, nicht erst beim Klick!
+        // Das verhindert Timing-Probleme.
+        auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+            .then(() => {
+                // FIX 2: Erst NACH Persistence Check nach Redirect schauen
+                return auth.getRedirectResult();
+            })
+            .then((result) => {
+                if (result.user) {
+                    console.log("Redirect Login erfolgreich.");
+                    // onAuthStateChanged wird gleich feuern
+                }
+            })
+            .catch((error) => {
+                console.error("Auth Init Fehler:", error);
+            });
 
-        // 2. REDIRECT RESULT PRÜFEN (Für Instagram Rückkehr)
-        try {
-            const result = await auth.getRedirectResult();
-            if (result.user) {
-                console.log("Redirect Login erfolgreich");
-                // Wir lassen onAuthStateChanged den Rest machen
-            }
-        } catch (error) {
-            console.error("Redirect Check Fehler:", error);
-        }
-
-        // 3. AUTH STATUS ÜBERWACHEN
+        // Auth-Status Listener (Das Herzstück)
         auth.onAuthStateChanged((user) => {
             if (user) {
                 app.handleLoginSuccess(user);
@@ -79,8 +80,10 @@ const app = {
         app.setVibe('classic');
     },
 
-    // --- HYBRID LOGIN 2.0 (Optimiert für Popup-Blocker) ---
-    loginWithMicrosoft: async () => {
+    // --- LOGIN FUNKTION (Jetzt ohne Verzögerung) ---
+    loginWithMicrosoft: () => {
+        // WICHTIG: Kein 'async' hier, damit der Browser den Klick direkt verarbeitet!
+        
         const provider = new firebase.auth.OAuthProvider('microsoft.com');
         provider.setCustomParameters({
             prompt: 'select_account',
@@ -91,38 +94,35 @@ const app = {
         const ua = navigator.userAgent || navigator.vendor || window.opera;
         const isInApp = (ua.indexOf("Instagram") > -1) || (ua.indexOf("FBAN") > -1) || (ua.indexOf("FBAV") > -1) || (ua.indexOf("TikTok") > -1);
 
-        try {
-            // UI sofort umschalten, damit User Feedback hat
-            document.getElementById('login-container').classList.add('hidden');
-            document.getElementById('auth-loading').classList.remove('hidden');
+        // UI sofort auf "Laden"
+        document.getElementById('login-container').classList.add('hidden');
+        document.getElementById('auth-loading').classList.remove('hidden');
 
-            if (isInApp) {
-                // FALL A: Instagram/TikTok -> REDIRECT
-                // Hier ist keine User-Interaktion nötig, Redirect darf dauern
-                console.log("In-App Browser: Starte Redirect...");
-                await auth.signInWithRedirect(provider);
-            } else {
-                // FALL B: Safari/Chrome -> POPUP
-                // WICHTIG: Hier darf KEIN 'await' davor stehen, sonst blockt Safari das Popup!
-                // Persistence wurde schon in init() gesetzt.
-                console.log("Standard Browser: Öffne Popup...");
-                await auth.signInWithPopup(provider);
-            }
-
-        } catch (error) {
-            console.error("Login Fehler:", error);
-            
-            if (error.code === 'auth/popup-closed-by-user') {
-                alert("Login abgebrochen. Bitte erneut klicken.");
-            } else if (error.code === 'auth/popup-blocked') {
-                alert("Popup wurde blockiert. Bitte klicke auf 'Erlauben' oder öffne die Seite in Safari/Chrome.");
-            } else {
-                alert("Login Fehler: " + error.message);
-            }
-
-            // UI Reset bei Fehler
-            document.getElementById('login-container').classList.remove('hidden');
-            document.getElementById('auth-loading').classList.add('hidden');
+        if (isInApp) {
+            // Instagram/TikTok: Redirect (Da Popups technisch unmöglich sind)
+            console.log("In-App Browser: Redirect");
+            auth.signInWithRedirect(provider).catch(err => {
+                alert("Fehler beim Redirect Start: " + err.message);
+                location.reload();
+            });
+        } else {
+            // Safari/Chrome: Popup (Da wir kein 'await' davor haben, erlaubt Safari das jetzt!)
+            console.log("Standard Browser: Popup");
+            auth.signInWithPopup(provider).catch(error => {
+                console.error("Popup Fehler:", error);
+                if (error.code === 'auth/popup-closed-by-user') {
+                    // User hat Fenster zugemacht - Reset UI
+                    document.getElementById('login-container').classList.remove('hidden');
+                    document.getElementById('auth-loading').classList.add('hidden');
+                } else if (error.code === 'auth/popup-blocked') {
+                    alert("Popup immer noch blockiert? Bitte Einstellungen prüfen.");
+                    document.getElementById('login-container').classList.remove('hidden');
+                    document.getElementById('auth-loading').classList.add('hidden');
+                } else {
+                    alert("Login Fehler: " + error.message);
+                    location.reload();
+                }
+            });
         }
     },
 
@@ -275,7 +275,6 @@ const app = {
         const pass = document.getElementById('admin-pass').value;
         try {
             await auth.signInWithEmailAndPassword(email, pass);
-            // Kein manueller Redirect hier, onAuthStateChanged erledigt das
             document.getElementById('admin-auth-modal').classList.add('hidden');
             setTimeout(() => location.reload(), 500); 
         } catch (error) {
