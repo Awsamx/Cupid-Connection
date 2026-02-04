@@ -40,29 +40,35 @@ const app = {
     },
 
     init: async () => {
-        // --- NEU: REDIRECT RESULT HANDLING ---
-        // Prüft beim Laden der Seite, ob wir gerade vom Microsoft-Login zurückkommen
+        // UI-Status: Erstmal Lade-Spinner zeigen, bis wir wissen was los ist
+        document.getElementById('login-container').classList.add('hidden');
+        document.getElementById('auth-loading').classList.remove('hidden');
+        document.getElementById('auth-overlay').classList.remove('hidden');
+
+        // Login-Session dauerhaft speichern (Wichtig für Safari!)
+        await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+
+        // 1. Check: Kommen wir gerade von Microsoft zurück?
         try {
-            const result = await auth.getRedirectResult();
-            if (result.user) {
-                // Erfolgreicher Login nach Redirect
-                app.handleLoginSuccess(result.user);
-            }
+            await auth.getRedirectResult();
+            // Wir müssen hier nichts tun, onAuthStateChanged feuert gleich automatisch
         } catch (error) {
-            console.error("Redirect Login Fehler:", error);
-            if (error.code !== 'auth/popup-closed-by-user' && error.code !== 'auth/user-cancelled') {
+            console.error("Redirect Fehler:", error);
+            if (error.code !== 'auth/popup-closed-by-user') {
                 alert("Login fehlgeschlagen: " + error.message);
             }
         }
 
-        // --- NORMALER AUTH STATUS CHECK ---
+        // 2. Genereller Auth-Check (feuert bei Page Load UND nach Redirect)
         auth.onAuthStateChanged((user) => {
             if (user) {
+                // User ist da -> App starten
                 app.handleLoginSuccess(user);
-                // Datenbank erst starten, wenn wir wissen, WER eingeloggt ist
                 app.startDatabaseListeners();
             } else {
-                document.getElementById('auth-overlay').classList.remove('hidden');
+                // Kein User -> Login Button zeigen
+                document.getElementById('auth-loading').classList.add('hidden');
+                document.getElementById('login-container').classList.remove('hidden');
             }
         });
 
@@ -84,7 +90,7 @@ const app = {
             app.renderModQueue(); 
         });
 
-        // 2. INTELLIGENTE BESTELL-LISTE
+        // 2. Orders
         let ordersQuery = db.collection("orders");
 
         if (app.currentUser !== 'admin@europagym.at') {
@@ -109,7 +115,7 @@ const app = {
             app.checkVipStatus();
         });
 
-        // 3. STATS
+        // 3. Stats
         db.collection("metadata").doc("stats").onSnapshot(doc => {
             if (doc.exists) {
                 app.data.totalCount = doc.data().count || 0;
@@ -149,7 +155,6 @@ const app = {
         return new Set(paidOrders.map(o => o.sender));
     },
 
-    // --- NEU: REDIRECT STATT POPUP ---
     loginWithMicrosoft: async () => {
         const provider = new firebase.auth.OAuthProvider('microsoft.com');
         provider.setCustomParameters({
@@ -161,17 +166,13 @@ const app = {
             document.getElementById('login-container').classList.add('hidden');
             document.getElementById('auth-loading').classList.remove('hidden');
 
-            // WICHTIG: signInWithRedirect statt signInWithPopup
-            // Safari/Mobile blockiert Popups oft, Redirect funktioniert immer.
+            // Safari Fix: Redirect nutzen
             await auth.signInWithRedirect(provider);
             
-            // Der Code hier wird nicht mehr ausgeführt, da die Seite neu lädt.
-            // Die Logik geht in init() -> getRedirectResult() weiter.
-
         } catch (error) {
             console.error("Login Start Fehler:", error);
             alert("Konnte Login nicht starten: " + error.message);
-            // Reset UI falls Redirect fehlschlägt
+            // Reset UI
             document.getElementById('login-container').classList.remove('hidden');
             document.getElementById('auth-loading').classList.add('hidden');
         }
@@ -204,7 +205,9 @@ const app = {
 
     logout: () => {
         sessionStorage.removeItem('userEmail');
-        auth.signOut().then(() => location.reload());
+        auth.signOut().then(() => {
+            window.location.reload();
+        });
     },
 
     nav: (id) => {
@@ -254,7 +257,7 @@ const app = {
             app.nav('admin');
             
             if (app.currentUser !== email) {
-                 location.reload(); 
+                 window.location.reload(); 
             }
 
         } catch (error) {
@@ -345,12 +348,9 @@ const app = {
 
             await db.collection("orders").doc(id).set(newOrder);
             
-            db.collection("metadata").doc("stats").update({
+            db.collection("metadata").doc("stats").set({
                 count: firebase.firestore.FieldValue.increment(1)
-            }).catch(e => {
-                // Falls Counter noch nicht existiert -> erstellen
-                db.collection("metadata").doc("stats").set({ count: 1 });
-            });
+            }, { merge: true }).catch(e => console.log(e));
 
             const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${id}&color=7c3aed&bgcolor=ffffff`;
             document.getElementById('qr-image').src = qrUrl;
@@ -465,7 +465,6 @@ const app = {
     renderMyOrders: () => {
         const list = document.getElementById('my-orders-list');
         const mine = (app.data.orders || []).filter(o => o.sender === app.currentUser).sort((a,b) => b.timestamp - a.timestamp);
-        
         const steps = ['Bestellt', 'Bezahlt', 'In Zubereitung', 'In Zustellung', 'Geliefert'];
 
         list.innerHTML = mine.length ? mine.map(o => {
