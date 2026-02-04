@@ -124,6 +124,7 @@ label:has(input[value="Full Combo"]:checked) {
 /* 5. Tracking Bar Steps */
 .tracking-step.active { background-color: #2dd4bf; border-color: #2dd4bf; }
 .tracking-line-fill { transition: width 1s cubic-bezier(0.4, 0, 0.2, 1); }
+
 /* =========================================
    NEU: DYNAMISCHER GOLD STATUS
    ========================================= */
@@ -133,8 +134,9 @@ label:has(input[value="Full Combo"]:checked) {
     background: linear-gradient(90deg, #ffd700, #ffec8b, #ffd700, #eab308) !important;
     background-size: 200% 200% !important;
     animation: gold-shimmer 2s linear infinite !important;
-    box-shadow: 0 0 20px rgba(255, 215, 0, 0.6), 0 0 40px rgba(255, 215, 0, 0.2) !important;
-    border: 1px solid rgba(255, 255, 255, 0.5);
+    /* Reduzierter Schatten, damit er nicht "ausläuft" */
+    box-shadow: inset 0 0 10px rgba(255, 255, 255, 0.5), 0 0 15px rgba(255, 215, 0, 0.4) !important;
+    border: none !important; /* Entfernt den inneren Rand, der oft übersteht */
 }
 
 /* Optional: Text-Farbe des Counters anpassen, wenn Gold aktiv ist */
