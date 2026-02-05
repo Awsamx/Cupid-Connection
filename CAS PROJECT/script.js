@@ -29,7 +29,8 @@ const app = {
     data: { 
         posts: [], 
         orders: [], 
-        totalCount: 0 
+        totalCount: 0,
+        views: 0 // NEU: Speicher für Views
     },
     currentUser: null,
     html5QrCode: null,
@@ -49,6 +50,9 @@ const app = {
 
     // --- STARTUP LOGIK ---
     init: () => {
+        // 1. Visit Counter starten (NEU)
+        app.countVisit();
+
         const loadingEl = document.getElementById('auth-loading');
         const loginContainer = document.getElementById('login-container');
         const overlay = document.getElementById('auth-overlay');
@@ -80,6 +84,20 @@ const app = {
         app.updateCountdown();
         setInterval(app.updateCountdown, 1000);
         app.setVibe('classic');
+    },
+
+    // --- NEU: VIEW COUNTER FUNKTION ---
+    countVisit: () => {
+        // Admin-Besuche nicht zählen, um Statistik nicht zu verfälschen
+        if (sessionStorage.getItem('adminLoggedIn')) return; 
+
+        // Firestore-Dokument inkrementieren
+        db.collection("metadata").doc("stats").update({
+            views: firebase.firestore.FieldValue.increment(1)
+        }).catch(err => {
+            // Fehler ignorieren, falls Dokument noch nicht existiert oder offline
+            console.log("View-Counter init...", err);
+        });
     },
 
     // --- LOGIN ---
@@ -130,7 +148,10 @@ const app = {
         let displayName = user.displayName || email.split('@')[0];
         if (email === 'admin@europagym.at') {
             displayName = "Admin";
+            sessionStorage.setItem('adminLoggedIn', 'true'); // NEU: Admin-Status merken
             app.nav('admin');
+        } else {
+            sessionStorage.removeItem('adminLoggedIn');
         }
 
         document.getElementById('current-user').innerText = displayName;
@@ -171,9 +192,11 @@ const app = {
             app.checkVipStatus();
         });
 
+        // UPDATE: Listener liest jetzt auch 'views'
         db.collection("metadata").doc("stats").onSnapshot(doc => {
             if (doc.exists) { 
                 app.data.totalCount = doc.data().count || 0; 
+                app.data.views = doc.data().views || 0; // NEU
                 app.updateStats(); 
             }
         });
@@ -217,8 +240,14 @@ const app = {
     // --- ZIELE & GOLD STATUS ---
     updateStats: () => {
         const total = app.data.totalCount || 0;
+        const views = app.data.views || 0; // NEU
+
         const bigCount = document.getElementById('total-count-big');
+        const viewsDisplay = document.getElementById('total-views'); // NEU
+
         if(bigCount) bigCount.innerText = total;
+        // NEU: Anzeige aktualisieren falls Element im HTML existiert
+        if(viewsDisplay) viewsDisplay.innerText = `${views.toLocaleString()} Aufrufe`;
         
         // Max Ziel auf 200 gesetzt
         const maxGoal = 200; 
@@ -249,6 +278,7 @@ const app = {
     // --- NAVIGATION ---
     logout: () => { 
         sessionStorage.removeItem('userEmail'); 
+        sessionStorage.removeItem('adminLoggedIn'); // Admin Flag löschen
         auth.signOut().then(() => location.reload()); 
     },
     
@@ -399,7 +429,7 @@ const app = {
         });
     },
 
-    // --- WALL & FEED (UPDATED: BREAK-INSIDE-AVOID & SMART LIKES) ---
+    // --- WALL & FEED ---
     renderFeed: (filter = 'all') => {
         const container = document.getElementById('feed-container');
         if (!container) return;
@@ -416,7 +446,7 @@ const app = {
         posts.forEach(post => {
             const likedByMe = (post.likedBy || []).includes(app.currentUser);
             
-            // FIX: 'fa-heart' wurde hier hinzugefügt!
+            // HERZ-ICON FIX: fa-heart hinzugefügt
             const heartIconClass = likedByMe ? 'fa-solid fa-heart text-pink-500' : 'fa-regular fa-heart text-gray-500';
             const heartAnimClass = likedByMe ? '' : 'group-hover:scale-110';
 
@@ -427,6 +457,7 @@ const app = {
             const vipClass = post.isVip ? 'vip-post' : '';
             const vipBadge = post.isVip ? '<span class="text-[#ffd700] ml-2 text-[10px] font-bold"><i class="fa-solid fa-crown"></i> VIP</span>' : '';
 
+            // LAYOUT FIX: break-inside-avoid
             container.innerHTML += `
                 <div class="glass-card p-6 rounded-2xl mb-4 break-inside-avoid border transition-all duration-300 ${hotClass} ${vipClass}">
                     <div class="flex justify-between items-start mb-2">
@@ -448,46 +479,43 @@ const app = {
         });
     },
 
-    // --- NEU: SMART LIKES (TOGGLE) ---
+    // --- SMART LIKES (TOGGLE) ---
     heartPost: (id, btn) => {
         const isLiked = btn.getAttribute('data-liked') === 'true';
         const icon = btn.querySelector('i');
         const countSpan = btn.querySelector('.hearts-count');
         let currentCount = parseInt(countSpan.innerText) || 0;
 
-        // --- OPTIMISTIC UI (Sofortiges Feedback) ---
+        // --- OPTIMISTIC UI ---
         if (isLiked) {
-            // UNLIKE machen
+            // UNLIKE
             currentCount--;
             icon.classList.replace('fa-solid', 'fa-regular');
             icon.classList.replace('text-pink-500', 'text-gray-500');
             countSpan.classList.replace('text-pink-500', 'text-gray-500');
             btn.setAttribute('data-liked', 'false');
         } else {
-            // LIKE machen
+            // LIKE
             currentCount++;
             icon.classList.replace('fa-regular', 'fa-solid');
             icon.classList.replace('text-gray-500', 'text-pink-500');
             countSpan.classList.replace('text-gray-500', 'text-pink-500');
             btn.setAttribute('data-liked', 'true');
             
-            // "Pop" Animation nur beim Liken
             icon.classList.add('heart-pop');
             setTimeout(() => icon.classList.remove('heart-pop'), 500);
         }
         countSpan.innerText = currentCount;
 
-        // --- DATENBANK UPDATE ---
+        // --- DATABASE UPDATE ---
         const postRef = db.collection("posts").doc(id);
 
         if (isLiked) {
-            // User entfernen und Zähler runter
             postRef.update({
                 hearts: firebase.firestore.FieldValue.increment(-1),
                 likedBy: firebase.firestore.FieldValue.arrayRemove(app.currentUser)
             }).catch(err => console.error("Fehler beim Unliken", err));
         } else {
-            // User hinzufügen und Zähler hoch
             postRef.update({
                 hearts: firebase.firestore.FieldValue.increment(1),
                 likedBy: firebase.firestore.FieldValue.arrayUnion(app.currentUser)
@@ -506,7 +534,7 @@ const app = {
             timestamp: Date.now(), 
             author: app.currentUser,
             isVip: app.isVip,
-            likedBy: [] // Startet mit leerer Like-Liste
+            likedBy: [] 
         })
         .then(() => { 
             document.getElementById('new-post-content').value = ''; 
