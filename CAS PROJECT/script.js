@@ -414,15 +414,12 @@ const app = {
         }
 
         posts.forEach(post => {
-            // 1. Prüfen: Habe ICH das schon geliked?
             const likedByMe = (post.likedBy || []).includes(app.currentUser);
             
-            // 2. Styling basierend auf Like-Status
-            // Wenn geliked: Herz ist Pink und gefüllt (fa-solid). Wenn nicht: Grau und leer (fa-regular)
-            const heartIconClass = likedByMe ? 'fa-solid text-pink-500' : 'fa-regular text-gray-500';
+            // FIX: 'fa-heart' wurde hier hinzugefügt!
+            const heartIconClass = likedByMe ? 'fa-solid fa-heart text-pink-500' : 'fa-regular fa-heart text-gray-500';
             const heartAnimClass = likedByMe ? '' : 'group-hover:scale-110';
 
-            // 3. Hot & VIP Logik
             const isHot = (post.hearts >= 5); 
             const hotClass = isHot ? 'post-hot' : 'border-white/5';
             const hotIcon = isHot ? '<span class="text-orange-500 ml-2 text-[10px] animate-pulse font-bold"><i class="fa-solid fa-fire"></i> TRENDING</span>' : '';
@@ -430,7 +427,6 @@ const app = {
             const vipClass = post.isVip ? 'vip-post' : '';
             const vipBadge = post.isVip ? '<span class="text-[#ffd700] ml-2 text-[10px] font-bold"><i class="fa-solid fa-crown"></i> VIP</span>' : '';
 
-            // WICHTIG: 'break-inside-avoid' verhindert, dass Karten abgeschnitten werden!
             container.innerHTML += `
                 <div class="glass-card p-6 rounded-2xl mb-4 break-inside-avoid border transition-all duration-300 ${hotClass} ${vipClass}">
                     <div class="flex justify-between items-start mb-2">
