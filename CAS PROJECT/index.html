@@ -182,36 +182,49 @@
                 </div>
             </div>
 
-            <div class="flex flex-col gap-4">
-                <button onclick="app.nav('order')" class="w-full btn-gradient rounded-[2.5rem] p-6 flex flex-col justify-center items-center group transition hover:scale-[1.02] shadow-xl">
-                    <div class="bg-white/20 w-16 h-16 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition">
-                        <i class="fa-solid fa-paper-plane text-2xl"></i>
+            <div class="grid grid-cols-2 gap-3 md:gap-4 w-full">
+                
+                <button onclick="app.nav('order')" class="h-full btn-gradient rounded-[2rem] p-4 md:p-6 flex flex-col justify-center items-center group transition hover:scale-[1.02] shadow-xl relative overflow-hidden">
+                    <div class="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition"></div>
+                    
+                    <div class="bg-white/20 w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center mb-3 group-hover:scale-110 transition backdrop-blur-sm">
+                        <i class="fa-solid fa-paper-plane text-xl md:text-2xl"></i>
                     </div>
-                    <span class="text-2xl font-bold">Jetzt Bestellen</span>
-                    <span class="text-white/80 text-sm">Brief, Keks oder Rose auswählen &rarr;</span>
+                    <span class="text-lg md:text-2xl font-bold leading-none mb-1">Bestellen</span>
+                    <span class="text-white/70 text-[10px] md:text-xs">Keks, Rose & Brief &rarr;</span>
                 </button>
 
-                <div class="glass-card p-1 border-[#eab308]/30 overflow-hidden rounded-[2.5rem] transform transition hover:scale-[1.01]">
-                    <div class="bg-black/40 rounded-[2.3rem] p-6 flex flex-col items-center text-center relative overflow-hidden group">
-                        <div class="absolute inset-0 bg-gradient-to-r from-transparent via-[#eab308]/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
-                        
-                        <div class="bg-[#eab308]/20 w-16 h-16 rounded-full flex items-center justify-center mb-4 border border-[#eab308]/50 shadow-[0_0_15px_rgba(234,179,8,0.3)]">
-                            <i class="fa-solid fa-crown text-[#eab308] text-2xl animate-pulse"></i>
+                <div class="h-full relative rounded-[2rem] p-[1px] bg-gradient-to-br from-[#ffd700] via-[#eab308] to-[#a16207] shadow-[0_0_20px_rgba(234,179,8,0.3)] group overflow-hidden transition hover:scale-[1.02]">
+                    
+                    <div class="absolute inset-0 bg-[#eab308]/20 backdrop-blur-xl"></div>
+                    <div class="absolute inset-0 bg-gradient-to-br from-[#eab308]/40 via-transparent to-black/40 mix-blend-overlay"></div>
+                    
+                    <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 z-10 pointer-events-none"></div>
+
+                    <div class="relative z-20 h-full flex flex-col items-center justify-center text-center p-3 md:p-4">
+                        <div class="mb-2 relative">
+                            <i class="fa-solid fa-crown text-3xl md:text-4xl text-[#ffd700] drop-shadow-[0_2px_10px_rgba(0,0,0,0.5)] animate-pulse"></i>
+                            <i class="fa-solid fa-crown text-3xl md:text-4xl text-white absolute top-0 left-0 opacity-50 blur-sm animate-pulse"></i>
                         </div>
                         
-                        <h3 class="text-xl font-extrabold text-[#eab308] mb-2 uppercase tracking-tighter">Werde VIP Member</h3>
-                        <p class="text-xs text-gray-400 mb-5 max-w-[260px] leading-relaxed">Bestelle jetzt in der <span class="text-[#eab308] font-bold">Early Bird Phase</span> (erste 100) für dauerhaften Status!</p>
+                        <h3 class="text-base md:text-xl font-black uppercase italic tracking-tighter text-white drop-shadow-md mb-1">
+                            VIP <span class="text-[#ffd700]">Gold</span>
+                        </h3>
                         
-                        <div class="grid grid-cols-2 gap-2 w-full text-[10px] font-bold uppercase tracking-widest text-gray-300">
-                            <div class="bg-white/5 p-2 rounded-xl border border-white/5 flex items-center justify-center gap-1"><i class="fa-solid fa-percent text-[#eab308]"></i> -15% Rabatt</div>
-                            <div class="bg-white/5 p-2 rounded-xl border border-white/5 flex items-center justify-center gap-1"><i class="fa-solid fa-truck-fast text-[#eab308]"></i> Prio-Versand</div>
-                            <div class="bg-white/5 p-2 rounded-xl border border-white/5 flex items-center justify-center gap-1"><i class="fa-solid fa-image text-[#eab308]"></i> Foto-Upload</div>
-                            <div class="bg-white/5 p-2 rounded-xl border border-white/5 flex items-center justify-center gap-1"><i class="fa-solid fa-star text-[#eab308]"></i> Gold-Profil</div>
+                        <p class="text-[9px] md:text-[10px] font-bold text-yellow-100 mb-2 leading-tight">
+                            Nur die ersten 100!
+                        </p>
+
+                        <div class="flex flex-wrap justify-center gap-1 w-full">
+                            <span class="bg-black/40 border border-[#ffd700]/30 text-[#ffd700] text-[8px] md:text-[9px] px-1.5 py-0.5 rounded shadow-sm font-bold">-15%</span>
+                            <span class="bg-black/40 border border-[#ffd700]/30 text-[#ffd700] text-[8px] md:text-[9px] px-1.5 py-0.5 rounded shadow-sm font-bold">Prio</span>
+                            <span class="bg-black/40 border border-[#ffd700]/30 text-[#ffd700] text-[8px] md:text-[9px] px-1.5 py-0.5 rounded shadow-sm font-bold">Upload</span>
                         </div>
                     </div>
                 </div>
 
             </div>
+            
         </section>
 
         <section id="wall" class="page-section">
