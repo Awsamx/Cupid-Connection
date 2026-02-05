@@ -10,18 +10,27 @@ const firebaseConfig = {
 };
 
 // --- 2. INITIALISIERUNG ---
+// Globale Variablen definieren
+var db, auth, storage, rtdb, analytics;
+
 try {
     firebase.initializeApp(firebaseConfig);
-    var db = firebase.firestore();
-    var auth = firebase.auth(); 
-    var storage = firebase.storage();
-    var rtdb = firebase.database(); 
-    const analytics = firebase.analytics();
-} catch(e) { console.error("Firebase Init Error:", e); }
+    db = firebase.firestore();
+    auth = firebase.auth(); 
+    storage = firebase.storage();
+    rtdb = firebase.database(); 
+    analytics = firebase.analytics();
+} catch(e) { 
+    console.error("Firebase Init Error:", e); 
+}
 
 // --- 3. APP LOGIK ---
 const app = {
-    data: { posts: [], orders: [], totalCount: 0 },
+    data: { 
+        posts: [], 
+        orders: [], 
+        totalCount: 0 
+    },
     currentUser: null,
     html5QrCode: null,
     activeOrderId: null,
@@ -29,14 +38,18 @@ const app = {
     listenersStarted: false,
 
     priceList: {
-        "Brief": 0.00, "Brief + Keks": 1.00, "Brief + Hariborose": 1.00,
-        "Brief + Papierrose": 2.00, "Brief + Hariborose + Keks": 2.00,
-        "Brief + Papierrose + Keks": 2.50, "Brief + Keks + Hariborose + Papierrose": 3.50
+        "Brief": 0.00, 
+        "Brief + Keks": 1.00, 
+        "Brief + Hariborose": 1.00,
+        "Brief + Papierrose": 2.00, 
+        "Brief + Hariborose + Keks": 2.00,
+        "Brief + Papierrose + Keks": 2.50, 
+        "Brief + Keks + Hariborose + Papierrose": 3.50
     },
 
-    // --- OPTIMIERTE INIT FUNKTION (SCHNELLER START) ---
+    // --- INIT FUNKTION ---
     init: () => {
-        // UI auf Standard setzen (Lade-Spinner an, Login aus)
+        // UI Reset
         const loadingEl = document.getElementById('auth-loading');
         const loginContainer = document.getElementById('login-container');
         const overlay = document.getElementById('auth-overlay');
@@ -44,35 +57,24 @@ const app = {
         loadingEl.classList.remove('hidden');
         loginContainer.classList.add('hidden');
 
-        // 1. Persistence setzen (Im Hintergrund - blockiert nicht den Klick!)
-        // Wir machen das hier, damit es beim Klick schon fertig ist.
+        // 1. Auth Persistence setzen
         auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
-            .then(() => {
-                console.log("Persistence auf LOCAL gesetzt.");
-            })
-            .catch(e => console.warn(e));
+            .catch(e => console.warn("Persistence Error:", e));
 
-        // 2. Redirect Ergebnis prüfen (Im Hintergrund)
+        // 2. Redirect Result prüfen (für Mobile Logins)
         auth.getRedirectResult().then((result) => {
-            if (result.user) {
-                console.log("Redirect Login erkannt.");
-                // onAuthStateChanged wird gleich feuern
-            }
-        }).catch(error => {
-            // Fehler hier ignorieren, da Login Button eh gleich kommt
-            console.log("Kein Redirect Return gefunden.");
-        });
+            if (result.user) console.log("Redirect Login erfolgreich.");
+        }).catch(error => console.log("Kein Redirect Return:", error));
 
-        // 3. Der wichtigste Listener: Feuert sobald Firebase bereit ist
+        // 3. Auth Listener starten
         auth.onAuthStateChanged((user) => {
             if (user) {
-                // User gefunden -> App starten
                 app.handleLoginSuccess(user);
                 if (!app.listenersStarted) {
                     app.startDatabaseListeners();
                 }
             } else {
-                // Kein User -> Login Button zeigen (Sofort)
+                // Kein User -> Login Screen zeigen
                 loadingEl.classList.add('hidden');
                 loginContainer.classList.remove('hidden');
                 overlay.classList.remove('hidden');
@@ -85,45 +87,33 @@ const app = {
         app.setVibe('classic');
     },
 
-    // --- LOGIN FUNKTION (Jetzt ohne Verzögerung) ---
+    // --- LOGIN ---
     loginWithMicrosoft: () => {
-        // WICHTIG: Kein 'async' und kein 'await' hier!
-        // Der Browser muss den Klick direkt verarbeiten.
-        
         const provider = new firebase.auth.OAuthProvider('microsoft.com');
-        provider.setCustomParameters({ prompt: 'select_account', tenant: 'f7bb63a9-5ed7-4a21-b43a-3f684ec4938b' });
+        provider.setCustomParameters({ 
+            prompt: 'select_account', 
+            tenant: 'f7bb63a9-5ed7-4a21-b43a-3f684ec4938b' 
+        });
 
-        // Browser-Erkennung
+        // Einfache User-Agent Prüfung für In-App Browser (Instagram etc.)
         const ua = navigator.userAgent || navigator.vendor || window.opera;
         const isInApp = (ua.indexOf("Instagram") > -1) || (ua.indexOf("FBAN") > -1) || (ua.indexOf("FBAV") > -1) || (ua.indexOf("TikTok") > -1);
 
-        // UI sofort auf "Laden"
         document.getElementById('login-container').classList.add('hidden');
         document.getElementById('auth-loading').classList.remove('hidden');
 
         if (isInApp) {
-            // Instagram: Redirect
-            console.log("In-App: Redirect");
             auth.signInWithRedirect(provider).catch(err => {
                 alert("Fehler: " + err.message);
                 location.reload(); 
             });
         } else {
-            // Safari/Chrome: Popup (Feuert jetzt SOFORT)
-            console.log("Standard: Popup");
             auth.signInWithPopup(provider).catch(error => {
                 console.error("Popup Fehler:", error);
-                
-                // UI Reset bei Abbruch/Fehler
                 document.getElementById('login-container').classList.remove('hidden');
                 document.getElementById('auth-loading').classList.add('hidden');
-                
                 if (error.code !== 'auth/popup-closed-by-user') {
-                    if (error.code === 'auth/popup-blocked') {
-                        alert("Popup blockiert. Bitte Einstellungen prüfen.");
-                    } else {
-                        alert("Login Fehler: " + error.message);
-                    }
+                    alert("Login Fehler: " + error.message);
                 }
             });
         }
@@ -131,6 +121,7 @@ const app = {
 
     handleLoginSuccess: (user) => {
         const email = user.email.toLowerCase();
+        // Domain Check
         if (!email.endsWith('@europagym.at') && email !== 'admin@europagym.at') { 
             auth.signOut(); 
             alert("Nur @europagym.at Adressen erlaubt.");
@@ -156,30 +147,45 @@ const app = {
         if(!app.listenersStarted) app.showToast("Erfolgreich eingeloggt 🚀");
     },
 
+    // --- DATENBANK LISTENER ---
     startDatabaseListeners: () => {
         if (app.listenersStarted) return;
         app.listenersStarted = true;
 
+        // Posts laden
         db.collection("posts").orderBy("timestamp", "desc").onSnapshot(snapshot => {
             app.data.posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             app.renderFeed();
             if(app.currentUser === 'admin@europagym.at') app.renderModQueue(); 
         });
 
+        // Bestellungen laden
         let ordersQuery = db.collection("orders");
-        if (app.currentUser !== 'admin@europagym.at') ordersQuery = ordersQuery.where("sender", "==", app.currentUser);
+        // Wenn kein Admin, filtere nur eigene Bestellungen
+        if (app.currentUser !== 'admin@europagym.at') {
+            ordersQuery = ordersQuery.where("sender", "==", app.currentUser);
+        }
+        
         ordersQuery.onSnapshot(snapshot => {
             app.data.orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            
             if (app.currentUser === 'admin@europagym.at') {
+                // Admin sieht alle, sortiert nach Datum
                 app.data.orders.sort((a,b) => b.timestamp - a.timestamp);
                 app.renderOrders(); 
             }
-            app.renderMyOrders(); app.checkVipStatus();
+            app.renderMyOrders(); 
+            app.checkVipStatus();
         });
 
+        // Stats (Counter) laden
         db.collection("metadata").doc("stats").onSnapshot(doc => {
-            if (doc.exists) { app.data.totalCount = doc.data().count || 0; app.updateStats(); }
+            if (doc.exists) { 
+                app.data.totalCount = doc.data().count || 0; 
+                app.updateStats(); 
+            }
         });
+        
         app.initPresence();
     },
 
@@ -191,7 +197,10 @@ const app = {
                 const myId = app.currentUser.replace(/\./g, '_').replace(/@/g, '_');
                 const userStatusRef = rtdb.ref('/presence/' + myId);
                 userStatusRef.onDisconnect().remove();
-                userStatusRef.set({ email: app.currentUser, last_seen: firebase.database.ServerValue.TIMESTAMP });
+                userStatusRef.set({ 
+                    email: app.currentUser, 
+                    last_seen: firebase.database.ServerValue.TIMESTAMP 
+                });
             }
         });
         rtdb.ref('/presence').on('value', (snapshot) => {
@@ -205,11 +214,10 @@ const app = {
         const hasPaid = (app.data.orders || []).some(o => o.priceAtOrder > 0 && o.sender === app.currentUser);
         app.isVip = hasPaid;
         const headerBadge = document.getElementById('vip-badge-header'); 
+        
         if (app.isVip) {
-            if(document.getElementById('vip-indicator')) document.getElementById('vip-indicator').classList.remove('hidden');
             if(headerBadge) headerBadge.classList.remove('hidden');
         } else {
-            if(document.getElementById('vip-indicator')) document.getElementById('vip-indicator').classList.add('hidden');
             if(headerBadge) headerBadge.classList.add('hidden');
         }
     },
@@ -218,31 +226,56 @@ const app = {
         const total = app.data.totalCount || 0;
         const bigCount = document.getElementById('total-count-big');
         if(bigCount) bigCount.innerText = total;
+        
         const maxGoal = 500; 
         let percentage = (total / maxGoal) * 100;
         if(percentage > 100) percentage = 100;
+        
         const bar = document.getElementById('progress-bar');
+        
+        // Gold Status ab 100 Bestellungen visualisieren
         if (total < 100) {
-            if(bar) bar.classList.add('is-gold');
-            if(bigCount) { bigCount.classList.add('gold-text-effect'); bigCount.classList.remove('text-brand-accent'); }
-        } else {
             if(bar) bar.classList.remove('is-gold');
-            if(bigCount) { bigCount.classList.remove('gold-text-effect'); bigCount.classList.add('text-brand-accent'); }
+            if(bigCount) { 
+                bigCount.classList.remove('gold-text-effect'); 
+                bigCount.classList.add('text-brand-accent'); 
+            }
+        } else {
+            if(bar) bar.classList.add('is-gold');
+            if(bigCount) { 
+                bigCount.classList.add('gold-text-effect'); 
+                bigCount.classList.remove('text-brand-accent'); 
+            }
         }
+        
         if(bar) bar.style.width = percentage + '%';
         app.updateTotal(); 
     },
 
-    logout: () => { sessionStorage.removeItem('userEmail'); auth.signOut().then(() => location.reload()); },
+    // --- NAVIGATION & TOOLS ---
+    logout: () => { 
+        sessionStorage.removeItem('userEmail'); 
+        auth.signOut().then(() => location.reload()); 
+    },
+    
     nav: (id) => {
         document.querySelectorAll('.page-section').forEach(s => s.classList.remove('active'));
         document.getElementById(id).classList.add('active');
-        document.querySelectorAll('nav button').forEach(b => { b.classList.remove('active-nav', 'text-white'); b.classList.add('text-gray-500'); });
+        
+        document.querySelectorAll('nav button').forEach(b => { 
+            b.classList.remove('active-nav', 'text-white'); 
+            b.classList.add('text-gray-500'); 
+        });
+        
         const btn = document.getElementById('nav-' + id);
-        if(btn) { btn.classList.remove('text-gray-500'); btn.classList.add('active-nav', 'text-white'); }
+        if(btn) { 
+            btn.classList.remove('text-gray-500'); 
+            btn.classList.add('active-nav', 'text-white'); 
+        }
         window.scrollTo({ top: 0, behavior: 'smooth' });
     },
 
+    // --- ADMIN FUNKTIONEN ---
     checkAdminAccess: () => {
         document.getElementById('admin-auth-modal').classList.remove('hidden');
         document.getElementById('admin-user').value = "admin@europagym.at";
@@ -255,19 +288,31 @@ const app = {
             await auth.signInWithEmailAndPassword(email, pass);
             document.getElementById('admin-auth-modal').classList.add('hidden');
             setTimeout(() => location.reload(), 500); 
-        } catch (error) { alert("Login fehlgeschlagen: " + error.message); }
+        } catch (error) { 
+            alert("Login fehlgeschlagen: " + error.message); 
+        }
     },
 
     adminTab: (tab) => {
         document.querySelectorAll('.admin-view').forEach(v => v.classList.add('hidden'));
         document.getElementById('admin-' + tab).classList.remove('hidden');
-        document.querySelectorAll('.admin-tab-btn').forEach(b => { b.classList.remove('bg-white/10', 'text-white'); b.classList.add('text-gray-500'); });
+        
+        document.querySelectorAll('.admin-tab-btn').forEach(b => { 
+            b.classList.remove('bg-white/10', 'text-white'); 
+            b.classList.add('text-gray-500'); 
+        });
+        
         const btn = document.getElementById('t-' + tab);
-        if(btn) { btn.classList.add('bg-white/10', 'text-white'); btn.classList.remove('text-gray-500'); }
+        if(btn) { 
+            btn.classList.add('bg-white/10', 'text-white'); 
+            btn.classList.remove('text-gray-500'); 
+        }
+        
         if(tab === 'mod') app.renderModQueue();
         if(tab === 'orders') app.renderOrders();
     },
 
+    // --- BESTELLLOGIK ---
     submitOrder: async () => {
         const id = 'ORD-' + Math.floor(Math.random() * 90000 + 10000);
         const recipient = document.getElementById('order-recipient').value;
@@ -275,14 +320,23 @@ const app = {
         const room = document.getElementById('order-room').value;
         const message = document.getElementById('order-message').value;
         const selectedBtn = document.querySelector('input[name="product"]:checked');
-        const fileInput = document.getElementById('order-image');
-        if (!recipient || !grade || !room || !message) { alert("Bitte ausfüllen."); return; }
+        const fileInput = document.getElementById('order-image'); // Optional
+
+        if (!recipient || !grade || !room || !message) { 
+            alert("Bitte alle Felder ausfüllen."); 
+            return; 
+        }
+
         let currentPrice = app.priceList[selectedBtn.value] || 0;
+        // VIP Rabatt Berechnung
         if (app.isVip && currentPrice > 0) currentPrice *= 0.85;
+
         const submitBtn = document.querySelector('#order-form button[type="submit"]');
         submitBtn.disabled = true;
+
         try {
             let imageUrl = null;
+            // Bild Upload Logik (falls vorhanden)
             if (app.isVip && fileInput && fileInput.files.length > 0) {
                 submitBtn.innerText = "Lade Bild...";
                 const file = fileInput.files[0];
@@ -290,16 +344,40 @@ const app = {
                 await storageRef.put(file);
                 imageUrl = await storageRef.getDownloadURL();
             }
-            const newOrder = { recipient, grade, room, product: selectedBtn.value, message, vibe: document.getElementById('order-vibe').value, sender: app.currentUser, status: 'Bestellt', isVip: app.isVip, priceAtOrder: currentPrice, timestamp: Date.now(), vipImage: imageUrl };
+
+            const newOrder = { 
+                recipient, 
+                grade, 
+                room, 
+                product: selectedBtn.value, 
+                message, 
+                vibe: document.getElementById('order-vibe').value, 
+                sender: app.currentUser, 
+                status: 'Bestellt', 
+                isVip: app.isVip, 
+                priceAtOrder: currentPrice, 
+                timestamp: Date.now(), 
+                vipImage: imageUrl 
+            };
+
             await db.collection("orders").doc(id).set(newOrder);
-            await db.collection("metadata").doc("stats").set({ count: firebase.firestore.FieldValue.increment(1) }, { merge: true });
+            await db.collection("metadata").doc("stats").set({ 
+                count: firebase.firestore.FieldValue.increment(1) 
+            }, { merge: true });
+
             document.getElementById('qr-image').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${id}&color=7c3aed&bgcolor=ffffff`;
             document.getElementById('qr-order-id').innerText = id;
             document.getElementById('qr-summary').innerHTML = `<div class="flex justify-between"><span>Produkt:</span> <span class="text-white font-bold">${newOrder.product}</span></div>`;
             document.getElementById('qr-modal').classList.remove('hidden');
             document.getElementById('order-form').reset();
             app.updateTotal(); 
-        } catch (err) { alert(err.message); } finally { submitBtn.disabled = false; submitBtn.innerText = "Bestellen & Code generieren"; }
+
+        } catch (err) { 
+            alert("Fehler bei Bestellung: " + err.message); 
+        } finally { 
+            submitBtn.disabled = false; 
+            submitBtn.innerText = "Bestellen & Code generieren"; 
+        }
     },
 
     getPhaseName: () => {
@@ -328,30 +406,65 @@ const app = {
         });
     },
 
+    // --- HYPE WALL FUNKTIONEN ---
     renderFeed: (filter = 'all') => {
         const container = document.getElementById('feed-container');
         if (!container) return;
         container.innerHTML = '';
+        
         let posts = (app.data.posts || []).filter(p => p.approved);
-        if(filter === 'new') posts.sort((a,b) => b.timestamp - a.timestamp); else posts.sort((a,b) => b.hearts - a.hearts); 
+        
+        if(filter === 'new') {
+            posts.sort((a,b) => b.timestamp - a.timestamp); 
+        } else {
+            posts.sort((a,b) => b.hearts - a.hearts); 
+        }
+
         posts.forEach(post => {
             container.innerHTML += `
                 <div class="glass-card p-6 rounded-2xl mb-4">
                     <p class="text-gray-200 text-sm mb-4">"${post.text}"</p>
                     <div class="flex justify-between items-center pt-3 border-t border-white/5">
                         <span class="text-[9px] font-bold text-gray-500 uppercase">Community</span>
-                        <button onclick="app.heartPost('${post.id}')" class="text-gray-500"><i class="fa-solid fa-heart"></i> ${post.hearts || 0}</button>
+                        <button onclick="app.heartPost('${post.id}')" class="text-gray-500 hover:text-pink-500 transition">
+                            <i class="fa-solid fa-heart"></i> ${post.hearts || 0}
+                        </button>
                     </div>
                 </div>`;
         });
     },
 
-    heartPost: (id) => db.collection("posts").doc(id).update({ hearts: firebase.firestore.FieldValue.increment(1) }),
+    // --- FIX: LIKE FUNKTION KORRIGIERT ---
+    heartPost: (id) => {
+        db.collection("posts").doc(id).update({ 
+            hearts: firebase.firestore.FieldValue.increment(1) 
+        })
+        .then(() => {
+            // Optional: Lokales Feedback oder Animation
+            console.log("Post geliked");
+        })
+        .catch(err => {
+            console.error("Fehler beim Liken:", err);
+            app.showToast("Fehler beim Liken");
+        });
+    },
+
     submitPost: () => {
         const txt = document.getElementById('new-post-content').value;
         if(!txt.trim()) return;
-        db.collection("posts").add({ text: txt, hearts: 0, approved: false, timestamp: Date.now(), author: app.currentUser })
-        .then(() => { document.getElementById('new-post-content').value = ''; document.getElementById('post-modal').classList.add('hidden'); app.showToast("Wartet auf Freigabe"); });
+        
+        db.collection("posts").add({ 
+            text: txt, 
+            hearts: 0, 
+            approved: false, 
+            timestamp: Date.now(), 
+            author: app.currentUser 
+        })
+        .then(() => { 
+            document.getElementById('new-post-content').value = ''; 
+            document.getElementById('post-modal').classList.add('hidden'); 
+            app.showToast("Wartet auf Freigabe"); 
+        });
     },
 
     filterWall: (type) => {
@@ -360,26 +473,47 @@ const app = {
         app.renderFeed(type);
     },
 
+    // --- ADMIN ORDER VIEW & RENDERERS ---
     renderMyOrders: () => {
         const list = document.getElementById('my-orders-list');
         const mine = (app.data.orders || []).filter(o => o.sender === app.currentUser).sort((a,b) => b.timestamp - a.timestamp);
+        
         list.innerHTML = mine.map(o => `
             <div class="glass-card p-6 rounded-[2rem] mb-4">
                 <div class="flex justify-between items-start mb-6">
-                    <div><div class="text-[10px] text-brand-primary font-mono">${o.id}</div><div class="font-bold text-white">${o.recipient}</div></div>
+                    <div>
+                        <div class="text-[10px] text-brand-primary font-mono">${o.id}</div>
+                        <div class="font-bold text-white">${o.recipient}</div>
+                    </div>
                     <div class="text-brand-accent text-[10px] uppercase font-bold">${o.status}</div>
                 </div>
             </div>`).join('') || '<div class="text-center text-gray-500">Keine Bestellungen.</div>';
     },
 
+    // --- FIX: PREISANZEIGE UND VIP BORDER ---
     renderOrders: () => {
         const list = document.getElementById('orders-list');
-        list.innerHTML = (app.data.orders || []).map(o => `
-            <div class="glass-card p-4 rounded-xl text-xs mb-2">
-                <div class="flex justify-between font-bold"><span>${o.id}</span><span>${o.status}</span></div>
-                <div class="text-white">${o.product} für ${o.recipient}</div>
-                <button onclick="app.showOrderDetails('${o.id}')" class="w-full mt-2 py-2 bg-white/5 rounded">Öffnen</button>
-            </div>`).join('');
+        
+        list.innerHTML = (app.data.orders || []).map(o => {
+            // FIX: VIP CSS Klasse hinzufügen
+            const vipClass = o.isVip ? 'vip-order-highlight' : '';
+            // FIX: Preis formatieren und anzeigen
+            const priceDisplay = o.priceAtOrder ? `${o.priceAtOrder.toFixed(2).replace('.', ',')}€` : 'Gratis';
+
+            return `
+            <div class="glass-card p-4 rounded-xl text-xs mb-2 ${vipClass}">
+                <div class="flex justify-between font-bold mb-1">
+                    <span>${o.id}</span>
+                    <span class="${o.status === 'Geliefert' ? 'text-green-500' : 'text-gray-400'}">${o.status}</span>
+                </div>
+                <div class="text-white font-medium mb-1">${o.product} für <span class="text-brand-accent">${o.recipient}</span></div>
+                <div class="flex justify-between items-center text-[10px] text-gray-500 mb-2">
+                    <span>${o.grade} / ${o.room}</span>
+                    <span class="text-white font-bold">${priceDisplay}</span>
+                </div>
+                <button onclick="app.showOrderDetails('${o.id}')" class="w-full py-2 bg-white/5 hover:bg-white/10 rounded transition">Öffnen</button>
+            </div>`;
+        }).join('');
     },
 
     renderModQueue: () => {
@@ -387,12 +521,12 @@ const app = {
         const pending = (app.data.posts || []).filter(p => !p.approved);
         q.innerHTML = pending.map(p => `
             <div class="glass-card p-4 flex justify-between items-center mb-2">
-                <p class="text-xs">"${p.text}"</p>
+                <p class="text-xs w-2/3">"${p.text}"</p>
                 <div class="flex gap-2">
-                    <button onclick="app.modAction('${p.id}', true)" class="text-green-500">✔</button>
-                    <button onclick="app.modAction('${p.id}', false)" class="text-red-500">✘</button>
+                    <button onclick="app.modAction('${p.id}', true)" class="text-green-500 p-2 hover:bg-green-500/10 rounded">✔</button>
+                    <button onclick="app.modAction('${p.id}', false)" class="text-red-500 p-2 hover:bg-red-500/10 rounded">✘</button>
                 </div>
-            </div>`).join('');
+            </div>`).join('') || '<div class="text-center text-gray-500 text-xs">Alles erledigt.</div>';
     },
 
     modAction: (id, approve) => approve ? db.collection("posts").doc(id).update({ approved: true }) : db.collection("posts").doc(id).delete(),
@@ -401,23 +535,45 @@ const app = {
         document.getElementById('reader').classList.remove('hidden');
         app.html5QrCode = new Html5Qrcode("reader");
         app.html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (txt) => {
-            app.html5QrCode.stop().then(() => { document.getElementById('reader').classList.add('hidden'); app.showOrderDetails(txt); });
+            app.html5QrCode.stop().then(() => { 
+                document.getElementById('reader').classList.add('hidden'); 
+                app.showOrderDetails(txt); 
+            });
         }).catch(err => alert("Kamera Fehler: " + err));
     },
 
     showOrderDetails: (id) => {
         const order = app.data.orders.find(o => o.id === id);
-        if (!order) return;
+        if (!order) {
+            app.showToast("Bestellung nicht gefunden!");
+            return;
+        }
         app.activeOrderId = id;
         document.getElementById('det-id').innerText = id;
         document.getElementById('det-recipient').innerText = order.recipient;
         document.getElementById('det-room').innerText = `${order.room} (${order.grade})`;
         document.getElementById('det-product').innerText = order.product;
         document.getElementById('det-message').innerText = order.message;
+        
+        // VIP Check im Detail View
+        const detailCard = document.querySelector('#active-order-view .glass-card');
+        if(order.isVip) {
+            detailCard.classList.add('vip-frame'); 
+            document.getElementById('det-product').innerHTML = `${order.product} <span class="text-yellow-500 ml-2"><i class="fa-solid fa-crown"></i> VIP</span>`;
+        } else {
+            detailCard.classList.remove('vip-frame');
+        }
+
         document.getElementById('active-order-view').classList.remove('hidden');
     },
 
-    updateStatus: (newStatus) => db.collection("orders").doc(app.activeOrderId).update({ status: newStatus }).then(() => { app.showToast(newStatus); document.getElementById('active-order-view').classList.add('hidden'); }),
+    updateStatus: (newStatus) => {
+        db.collection("orders").doc(app.activeOrderId).update({ status: newStatus })
+        .then(() => { 
+            app.showToast(newStatus); 
+            document.getElementById('active-order-view').classList.add('hidden'); 
+        });
+    },
 
     showToast: (msg) => {
         const t = document.getElementById('toast');
