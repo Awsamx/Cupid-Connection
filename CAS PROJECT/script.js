@@ -100,7 +100,7 @@ const app = {
         });
     },
 
-    // --- LOGIN ---
+    // --- LOGIN (MIT INSTAGRAM FIX) ---
     loginWithMicrosoft: () => {
         const provider = new firebase.auth.OAuthProvider('microsoft.com');
         provider.setCustomParameters({ 
@@ -108,18 +108,32 @@ const app = {
             tenant: 'f7bb63a9-5ed7-4a21-b43a-3f684ec4938b' 
         });
 
+        // Erweiterte Erkennung für In-App Browser (Instagram, TikTok, Facebook)
         const ua = navigator.userAgent || navigator.vendor || window.opera;
-        const isInApp = (ua.indexOf("Instagram") > -1) || (ua.indexOf("FBAN") > -1) || (ua.indexOf("FBAV") > -1) || (ua.indexOf("TikTok") > -1);
+        const isInApp = (ua.indexOf("Instagram") > -1) || 
+                        (ua.indexOf("FBAN") > -1) || 
+                        (ua.indexOf("FBAV") > -1) || 
+                        (ua.indexOf("TikTok") > -1);
 
+        // UI Updates
         document.getElementById('login-container').classList.add('hidden');
         document.getElementById('auth-loading').classList.remove('hidden');
 
         if (isInApp) {
-            auth.signInWithRedirect(provider).catch(err => {
-                alert("Fehler: " + err.message);
-                location.reload(); 
-            });
+            // 🚨 WICHTIG: Instagram User warnen!
+            // Wir zeigen einen Alert und brechen den automatischen Login-Versuch ab, 
+            // damit der User nicht in einem "Lade..." Screen hängen bleibt.
+            
+            document.getElementById('auth-loading').classList.add('hidden');
+            document.getElementById('login-container').classList.remove('hidden');
+            
+            // Eine klare Anweisung an den User
+            alert("⚠️ WICHTIG!\n\nDer Login funktioniert nicht direkt in Instagram.\n\nBitte tippe oben rechts auf die drei Punkte (•••) und wähle 'In Browser öffnen' (Safari oder Chrome).");
+            
+            // Optional: Trotzdem versuchen (führt aber oft zu Fehlern)
+            // auth.signInWithRedirect(provider); 
         } else {
+            // Standard Browser: Popup funktioniert perfekt
             auth.signInWithPopup(provider).catch(error => {
                 console.error("Popup Fehler:", error);
                 document.getElementById('login-container').classList.remove('hidden');
