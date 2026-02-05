@@ -9,7 +9,7 @@ const firebaseConfig = {
     measurementId: "G-BG2LW0BTDZ"
 };
 
-// Variablen global definieren, damit sie überall verfügbar sind
+// Variablen global definieren
 var db, auth, storage, rtdb, analytics;
 
 // --- 2. INITIALISIERUNG ---
@@ -49,7 +49,6 @@ const app = {
 
     // --- STARTUP LOGIK ---
     init: () => {
-        // UI auf Standard-Ladezustand setzen
         const loadingEl = document.getElementById('auth-loading');
         const loginContainer = document.getElementById('login-container');
         const overlay = document.getElementById('auth-overlay');
@@ -57,16 +56,13 @@ const app = {
         loadingEl.classList.remove('hidden');
         loginContainer.classList.add('hidden');
 
-        // Auth Persistence auf LOCAL setzen (verhindert ständiges Ausloggen)
         auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
             .catch(e => console.warn("Persistence Error:", e));
 
-        // Redirect Result prüfen (wichtig für mobile Browser)
         auth.getRedirectResult().then((result) => {
             if (result.user) console.log("Redirect Login erkannt.");
         }).catch(error => console.log("Kein Redirect Return:", error));
 
-        // Haupt-Listener für Login-Status
         auth.onAuthStateChanged((user) => {
             if (user) {
                 app.handleLoginSuccess(user);
@@ -86,7 +82,7 @@ const app = {
         app.setVibe('classic');
     },
 
-    // --- LOGIN FUNKTIONEN ---
+    // --- LOGIN ---
     loginWithMicrosoft: () => {
         const provider = new firebase.auth.OAuthProvider('microsoft.com');
         provider.setCustomParameters({ 
@@ -144,19 +140,17 @@ const app = {
         if(!app.listenersStarted) app.showToast("Erfolgreich eingeloggt 🚀");
     },
 
-    // --- DATENBANK & REALTIME LISTENER ---
+    // --- LISTENER ---
     startDatabaseListeners: () => {
         if (app.listenersStarted) return;
         app.listenersStarted = true;
 
-        // Wall Posts
         db.collection("posts").orderBy("timestamp", "desc").onSnapshot(snapshot => {
             app.data.posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             app.renderFeed();
             if(app.currentUser === 'admin@europagym.at') app.renderModQueue(); 
         });
 
-        // Bestellungen
         let ordersQuery = db.collection("orders");
         if (app.currentUser !== 'admin@europagym.at') {
             ordersQuery = ordersQuery.where("sender", "==", app.currentUser);
@@ -166,11 +160,10 @@ const app = {
             app.data.orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             
             if (app.currentUser === 'admin@europagym.at') {
-                // Admin Sortierung: VIPs zuerst, dann neueste
                 app.data.orders.sort((a,b) => {
-                    if (a.isVip && !b.isVip) return -1; // VIP nach oben
+                    if (a.isVip && !b.isVip) return -1;
                     if (!a.isVip && b.isVip) return 1;
-                    return b.timestamp - a.timestamp;   // Sonst nach Zeit
+                    return b.timestamp - a.timestamp;
                 });
                 app.renderOrders(); 
             }
@@ -178,7 +171,6 @@ const app = {
             app.checkVipStatus();
         });
 
-        // Globaler Zähler (Stats)
         db.collection("metadata").doc("stats").onSnapshot(doc => {
             if (doc.exists) { 
                 app.data.totalCount = doc.data().count || 0; 
@@ -222,27 +214,27 @@ const app = {
         }
     },
 
+    // --- ÄNDERUNG: ZIELE & GOLD STATUS ---
     updateStats: () => {
         const total = app.data.totalCount || 0;
         const bigCount = document.getElementById('total-count-big');
         if(bigCount) bigCount.innerText = total;
         
-        const maxGoal = 500; 
+        // NEU: Max Ziel auf 200 gesetzt
+        const maxGoal = 200; 
         let percentage = (total / maxGoal) * 100;
         if(percentage > 100) percentage = 100;
         
         const bar = document.getElementById('progress-bar');
         
-        // LOGIK UPDATE: Gold-Status NUR für die ersten 100 (Early Bird / VIP Phase)
-        if (total < 100) {
-            // Unter 100: Gold aktiv!
+        // NEU: Gold Status nur unter 50 Bestellungen
+        if (total < 50) {
             if(bar) bar.classList.add('is-gold');
             if(bigCount) { 
                 bigCount.classList.add('gold-text-effect'); 
                 bigCount.classList.remove('text-brand-accent'); 
             }
         } else {
-            // Über 100: Standard (Bunt)
             if(bar) bar.classList.remove('is-gold');
             if(bigCount) { 
                 bigCount.classList.remove('gold-text-effect'); 
@@ -277,7 +269,7 @@ const app = {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     },
 
-    // --- ADMIN BEREICH ---
+    // --- ADMIN ---
     checkAdminAccess: () => {
         document.getElementById('admin-auth-modal').classList.remove('hidden');
         document.getElementById('admin-user').value = "admin@europagym.at";
@@ -314,7 +306,7 @@ const app = {
         if(tab === 'orders') app.renderOrders();
     },
 
-    // --- BESTELLUNG ABSCHICKEN ---
+    // --- BESTELLUNG ---
     submitOrder: async () => {
         const id = 'ORD-' + Math.floor(Math.random() * 90000 + 10000);
         const recipient = document.getElementById('order-recipient').value;
@@ -330,14 +322,13 @@ const app = {
         }
 
         let currentPrice = app.priceList[selectedBtn.value] || 0;
-        if (app.isVip && currentPrice > 0) currentPrice *= 0.85; // VIP Rabatt
+        if (app.isVip && currentPrice > 0) currentPrice *= 0.85; 
 
         const submitBtn = document.querySelector('#order-form button[type="submit"]');
         submitBtn.disabled = true;
 
         try {
             let imageUrl = null;
-            // Bild-Upload nur für VIPs
             if (app.isVip && fileInput && fileInput.files.length > 0) {
                 submitBtn.innerText = "Lade Bild...";
                 const file = fileInput.files[0];
@@ -362,12 +353,10 @@ const app = {
             };
 
             await db.collection("orders").doc(id).set(newOrder);
-            // Zähler erhöhen
             await db.collection("metadata").doc("stats").set({ 
                 count: firebase.firestore.FieldValue.increment(1) 
             }, { merge: true });
 
-            // QR Code Generierung
             document.getElementById('qr-image').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${id}&color=7c3aed&bgcolor=ffffff`;
             document.getElementById('qr-order-id').innerText = id;
             document.getElementById('qr-summary').innerHTML = `<div class="flex justify-between"><span>Produkt:</span> <span class="text-white font-bold">${newOrder.product}</span></div>`;
@@ -383,12 +372,13 @@ const app = {
         }
     },
 
+    // --- NEU: PHASEN TEXTE ANGEPASST AN 200ER SKALA ---
     getPhaseName: () => {
         const count = app.data.totalCount || 0;
-        if (count < 100) return "Start: 0% Rabatt";
-        if (count < 200) return "Phase 1: -5% Rabatt 📉";
-        if (count < 300) return "Phase 2: -10% Rabatt 📉";
-        if (count < 400) return "Phase 3: -15% Rabatt 📉";
+        if (count < 50) return "Start: 0% Rabatt";
+        if (count < 100) return "Phase 1: -5% Rabatt 📉";
+        if (count < 150) return "Phase 2: -10% Rabatt 📉";
+        if (count < 200) return "Phase 3: -15% Rabatt 📉";
         return "ZIEL: 20% RABATT 🔥";
     },
 
@@ -409,7 +399,7 @@ const app = {
         });
     },
 
-    // --- WALL FEED ---
+    // --- WALL & FEED ---
     renderFeed: (filter = 'all') => {
         const container = document.getElementById('feed-container');
         if (!container) return;
@@ -472,6 +462,7 @@ const app = {
         app.renderFeed(type);
     },
 
+    // --- ADMIN VIEWS ---
     renderMyOrders: () => {
         const list = document.getElementById('my-orders-list');
         const mine = (app.data.orders || []).filter(o => o.sender === app.currentUser).sort((a,b) => b.timestamp - a.timestamp);
@@ -488,16 +479,12 @@ const app = {
             </div>`).join('') || '<div class="text-center text-gray-500">Keine Bestellungen.</div>';
     },
 
-    // --- ADMIN BESTELLÜBERSICHT ---
     renderOrders: () => {
         const list = document.getElementById('orders-list');
         
         list.innerHTML = (app.data.orders || []).map(o => {
-            // VIP Highlighting Klasse
             const vipClass = o.isVip ? 'vip-order-highlight' : '';
-            // Preis Formatierung
             const priceDisplay = o.priceAtOrder ? `${o.priceAtOrder.toFixed(2).replace('.', ',')}€` : 'Gratis';
-            // VIP Icon
             const vipIcon = o.isVip ? '<i class="fa-solid fa-crown text-yellow-500 mr-1"></i>' : '';
 
             return `
@@ -555,7 +542,6 @@ const app = {
         document.getElementById('det-product').innerText = order.product;
         document.getElementById('det-message').innerText = order.message;
         
-        // VIP Styling im Detail-Fenster
         const detailCard = document.querySelector('#active-order-view .glass-card');
         if(order.isVip) {
             detailCard.classList.add('vip-frame'); 
