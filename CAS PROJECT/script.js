@@ -399,7 +399,7 @@ const app = {
         });
     },
 
-    // --- WALL & FEED (UPDATED) ---
+    // --- WALL & FEED (UPDATED: BREAK-INSIDE-AVOID & SMART LIKES) ---
     renderFeed: (filter = 'all') => {
         const container = document.getElementById('feed-container');
         if (!container) return;
@@ -414,17 +414,25 @@ const app = {
         }
 
         posts.forEach(post => {
-            // LOGIK: Wann ist ein Post "Hot"? (Hier ab 5 Likes)
+            // 1. Prüfen: Habe ICH das schon geliked?
+            const likedByMe = (post.likedBy || []).includes(app.currentUser);
+            
+            // 2. Styling basierend auf Like-Status
+            // Wenn geliked: Herz ist Pink und gefüllt (fa-solid). Wenn nicht: Grau und leer (fa-regular)
+            const heartIconClass = likedByMe ? 'fa-solid text-pink-500' : 'fa-regular text-gray-500';
+            const heartAnimClass = likedByMe ? '' : 'group-hover:scale-110';
+
+            // 3. Hot & VIP Logik
             const isHot = (post.hearts >= 5); 
             const hotClass = isHot ? 'post-hot' : 'border-white/5';
             const hotIcon = isHot ? '<span class="text-orange-500 ml-2 text-[10px] animate-pulse font-bold"><i class="fa-solid fa-fire"></i> TRENDING</span>' : '';
 
-            // LOGIK: VIP Spotlight
             const vipClass = post.isVip ? 'vip-post' : '';
             const vipBadge = post.isVip ? '<span class="text-[#ffd700] ml-2 text-[10px] font-bold"><i class="fa-solid fa-crown"></i> VIP</span>' : '';
 
+            // WICHTIG: 'break-inside-avoid' verhindert, dass Karten abgeschnitten werden!
             container.innerHTML += `
-                <div class="glass-card p-6 rounded-2xl mb-4 border transition-all duration-300 ${hotClass} ${vipClass}">
+                <div class="glass-card p-6 rounded-2xl mb-4 break-inside-avoid border transition-all duration-300 ${hotClass} ${vipClass}">
                     <div class="flex justify-between items-start mb-2">
                         <div class="flex items-center">
                             <span class="text-[9px] font-bold text-gray-500 uppercase tracking-widest">Anonym</span>
@@ -435,42 +443,60 @@ const app = {
                     <p class="text-gray-200 text-sm mb-4 leading-relaxed font-medium">"${post.text}"</p>
                     <div class="flex justify-between items-center pt-3 border-t border-white/5">
                         <span class="text-[9px] text-gray-600">Cupid Wall</span>
-                        <button onclick="app.heartPost('${post.id}', this)" class="text-gray-500 hover:text-pink-500 transition-all flex items-center gap-1.5 group">
-                            <i class="fa-solid fa-heart transition-transform group-hover:scale-110"></i> 
-                            <span class="text-xs font-bold hearts-count transition-colors">${post.hearts || 0}</span>
+                        <button onclick="app.heartPost('${post.id}', this)" class="group transition-all flex items-center gap-1.5" data-liked="${likedByMe}">
+                            <i class="${heartIconClass} ${heartAnimClass} transition-transform text-lg"></i> 
+                            <span class="text-xs font-bold hearts-count transition-colors ${likedByMe ? 'text-pink-500' : 'text-gray-500'}">${post.hearts || 0}</span>
                         </button>
                     </div>
                 </div>`;
         });
     },
 
-    // --- NEU: VISUELLES JUICE (Animation & Sofort-Feedback) ---
+    // --- NEU: SMART LIKES (TOGGLE) ---
     heartPost: (id, btn) => {
-        // 1. Visuelles Feedback (Sofort)
+        const isLiked = btn.getAttribute('data-liked') === 'true';
         const icon = btn.querySelector('i');
         const countSpan = btn.querySelector('.hearts-count');
-        
-        // Explosion-Klasse hinzufügen
-        icon.classList.add('heart-pop');
-        countSpan.classList.add('text-pink-500');
+        let currentCount = parseInt(countSpan.innerText) || 0;
 
-        // Zähler optisch hochzählen
-        let current = parseInt(countSpan.innerText);
-        countSpan.innerText = current + 1;
+        // --- OPTIMISTIC UI (Sofortiges Feedback) ---
+        if (isLiked) {
+            // UNLIKE machen
+            currentCount--;
+            icon.classList.replace('fa-solid', 'fa-regular');
+            icon.classList.replace('text-pink-500', 'text-gray-500');
+            countSpan.classList.replace('text-pink-500', 'text-gray-500');
+            btn.setAttribute('data-liked', 'false');
+        } else {
+            // LIKE machen
+            currentCount++;
+            icon.classList.replace('fa-regular', 'fa-solid');
+            icon.classList.replace('text-gray-500', 'text-pink-500');
+            countSpan.classList.replace('text-gray-500', 'text-pink-500');
+            btn.setAttribute('data-liked', 'true');
+            
+            // "Pop" Animation nur beim Liken
+            icon.classList.add('heart-pop');
+            setTimeout(() => icon.classList.remove('heart-pop'), 500);
+        }
+        countSpan.innerText = currentCount;
 
-        // Klasse nach Animation wieder entfernen
-        setTimeout(() => icon.classList.remove('heart-pop'), 500);
+        // --- DATENBANK UPDATE ---
+        const postRef = db.collection("posts").doc(id);
 
-        // 2. Datenbank Update
-        db.collection("posts").doc(id).update({ 
-            hearts: firebase.firestore.FieldValue.increment(1) 
-        })
-        .then(() => console.log("Geliked!"))
-        .catch(err => {
-            console.error("Like Fehler:", err);
-            // Falls Fehler: Zähler zurücksetzen
-            countSpan.innerText = current; 
-        });
+        if (isLiked) {
+            // User entfernen und Zähler runter
+            postRef.update({
+                hearts: firebase.firestore.FieldValue.increment(-1),
+                likedBy: firebase.firestore.FieldValue.arrayRemove(app.currentUser)
+            }).catch(err => console.error("Fehler beim Unliken", err));
+        } else {
+            // User hinzufügen und Zähler hoch
+            postRef.update({
+                hearts: firebase.firestore.FieldValue.increment(1),
+                likedBy: firebase.firestore.FieldValue.arrayUnion(app.currentUser)
+            }).catch(err => console.error("Fehler beim Liken", err));
+        }
     },
 
     submitPost: () => {
@@ -483,7 +509,8 @@ const app = {
             approved: false, 
             timestamp: Date.now(), 
             author: app.currentUser,
-            isVip: app.isVip // WICHTIG: Status für Spotlight speichern!
+            isVip: app.isVip,
+            likedBy: [] // Startet mit leerer Like-Liste
         })
         .then(() => { 
             document.getElementById('new-post-content').value = ''; 
@@ -552,7 +579,24 @@ const app = {
             </div>`).join('') || '<div class="text-center text-gray-500 text-xs">Alles erledigt.</div>';
     },
 
-    modAction: (id, approve) => approve ? db.collection("posts").doc(id).update({ approved: true }) : db.collection("posts").doc(id).delete(),
+    modAction: (id, approve) => {
+        console.log("Starte Mod-Action für ID:", id, "Genehmigen:", approve);
+        let actionPromise;
+        if (approve) {
+            actionPromise = db.collection("posts").doc(id).update({ approved: true });
+        } else {
+            actionPromise = db.collection("posts").doc(id).delete();
+        }
+        actionPromise
+            .then(() => {
+                console.log("Aktion erfolgreich!");
+                app.showToast(approve ? "Post freigegeben ✅" : "Post gelöscht 🗑️");
+            })
+            .catch((error) => {
+                console.error("Fehler bei Mod-Action:", error);
+                alert("Fehler: " + error.message);
+            });
+    },
 
     startScanner: () => {
         document.getElementById('reader').classList.remove('hidden');
