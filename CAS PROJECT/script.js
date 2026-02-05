@@ -214,20 +214,20 @@ const app = {
         }
     },
 
-    // --- ÄNDERUNG: ZIELE & GOLD STATUS ---
+    // --- ZIELE & GOLD STATUS ---
     updateStats: () => {
         const total = app.data.totalCount || 0;
         const bigCount = document.getElementById('total-count-big');
         if(bigCount) bigCount.innerText = total;
         
-        // NEU: Max Ziel auf 200 gesetzt
+        // Max Ziel auf 200 gesetzt
         const maxGoal = 200; 
         let percentage = (total / maxGoal) * 100;
         if(percentage > 100) percentage = 100;
         
         const bar = document.getElementById('progress-bar');
         
-        // NEU: Gold Status nur unter 50 Bestellungen
+        // Gold Status nur unter 50 Bestellungen (Early Bird / VIP Phase)
         if (total < 50) {
             if(bar) bar.classList.add('is-gold');
             if(bigCount) { 
@@ -372,7 +372,7 @@ const app = {
         }
     },
 
-    // --- NEU: PHASEN TEXTE ANGEPASST AN 200ER SKALA ---
+    // --- PHASEN TEXTE (200er Skala) ---
     getPhaseName: () => {
         const count = app.data.totalCount || 0;
         if (count < 50) return "Start: 0% Rabatt";
@@ -399,7 +399,7 @@ const app = {
         });
     },
 
-    // --- WALL & FEED ---
+    // --- WALL & FEED (UPDATED) ---
     renderFeed: (filter = 'all') => {
         const container = document.getElementById('feed-container');
         if (!container) return;
@@ -414,27 +414,62 @@ const app = {
         }
 
         posts.forEach(post => {
+            // LOGIK: Wann ist ein Post "Hot"? (Hier ab 5 Likes)
+            const isHot = (post.hearts >= 5); 
+            const hotClass = isHot ? 'post-hot' : 'border-white/5';
+            const hotIcon = isHot ? '<span class="text-orange-500 ml-2 text-[10px] animate-pulse font-bold"><i class="fa-solid fa-fire"></i> TRENDING</span>' : '';
+
+            // LOGIK: VIP Spotlight
+            const vipClass = post.isVip ? 'vip-post' : '';
+            const vipBadge = post.isVip ? '<span class="text-[#ffd700] ml-2 text-[10px] font-bold"><i class="fa-solid fa-crown"></i> VIP</span>' : '';
+
             container.innerHTML += `
-                <div class="glass-card p-6 rounded-2xl mb-4">
-                    <p class="text-gray-200 text-sm mb-4">"${post.text}"</p>
+                <div class="glass-card p-6 rounded-2xl mb-4 border transition-all duration-300 ${hotClass} ${vipClass}">
+                    <div class="flex justify-between items-start mb-2">
+                        <div class="flex items-center">
+                            <span class="text-[9px] font-bold text-gray-500 uppercase tracking-widest">Anonym</span>
+                            ${vipBadge}
+                            ${hotIcon}
+                        </div>
+                    </div>
+                    <p class="text-gray-200 text-sm mb-4 leading-relaxed font-medium">"${post.text}"</p>
                     <div class="flex justify-between items-center pt-3 border-t border-white/5">
-                        <span class="text-[9px] font-bold text-gray-500 uppercase">Community</span>
-                        <button onclick="app.heartPost('${post.id}')" class="text-gray-500 hover:text-pink-500 transition">
-                            <i class="fa-solid fa-heart"></i> ${post.hearts || 0}
+                        <span class="text-[9px] text-gray-600">Cupid Wall</span>
+                        <button onclick="app.heartPost('${post.id}', this)" class="text-gray-500 hover:text-pink-500 transition-all flex items-center gap-1.5 group">
+                            <i class="fa-solid fa-heart transition-transform group-hover:scale-110"></i> 
+                            <span class="text-xs font-bold hearts-count transition-colors">${post.hearts || 0}</span>
                         </button>
                     </div>
                 </div>`;
         });
     },
 
-    heartPost: (id) => {
+    // --- NEU: VISUELLES JUICE (Animation & Sofort-Feedback) ---
+    heartPost: (id, btn) => {
+        // 1. Visuelles Feedback (Sofort)
+        const icon = btn.querySelector('i');
+        const countSpan = btn.querySelector('.hearts-count');
+        
+        // Explosion-Klasse hinzufügen
+        icon.classList.add('heart-pop');
+        countSpan.classList.add('text-pink-500');
+
+        // Zähler optisch hochzählen
+        let current = parseInt(countSpan.innerText);
+        countSpan.innerText = current + 1;
+
+        // Klasse nach Animation wieder entfernen
+        setTimeout(() => icon.classList.remove('heart-pop'), 500);
+
+        // 2. Datenbank Update
         db.collection("posts").doc(id).update({ 
             hearts: firebase.firestore.FieldValue.increment(1) 
         })
         .then(() => console.log("Geliked!"))
         .catch(err => {
             console.error("Like Fehler:", err);
-            app.showToast("Fehler beim Liken");
+            // Falls Fehler: Zähler zurücksetzen
+            countSpan.innerText = current; 
         });
     },
 
@@ -447,7 +482,8 @@ const app = {
             hearts: 0, 
             approved: false, 
             timestamp: Date.now(), 
-            author: app.currentUser 
+            author: app.currentUser,
+            isVip: app.isVip // WICHTIG: Status für Spotlight speichern!
         })
         .then(() => { 
             document.getElementById('new-post-content').value = ''; 

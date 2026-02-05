@@ -143,4 +143,37 @@ label:has(input[value="Full Combo"]:checked) {
 .gold-text-effect {
     color: #ffd700 !important;
     text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+}/* =========================================
+   HYPE WALL VISUAL JUICE
+   ========================================= */
+
+/* 1. Hot Post (Pulsierender Rahmen für viele Likes) */
+.post-hot {
+    border: 1px solid #db2777 !important; /* Pink Border */
+    box-shadow: 0 0 20px rgba(219, 39, 119, 0.25);
+    animation: pulse-hot 3s infinite;
+}
+
+@keyframes pulse-hot {
+    0% { box-shadow: 0 0 15px rgba(219, 39, 119, 0.2); transform: scale(1); }
+    50% { box-shadow: 0 0 25px rgba(219, 39, 119, 0.4); transform: scale(1.01); }
+    100% { box-shadow: 0 0 15px rgba(219, 39, 119, 0.2); transform: scale(1); }
+}
+
+/* 2. VIP Post (Goldener Touch) */
+.vip-post {
+    border: 1px solid rgba(234, 179, 8, 0.5) !important; /* Gold Border */
+    background: linear-gradient(145deg, rgba(234, 179, 8, 0.05), rgba(0,0,0,0));
+}
+
+/* 3. Herz Klick Explosion */
+.heart-pop {
+    animation: heartPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    color: #db2777 !important; /* Sofort Pink */
+}
+
+@keyframes heartPop {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.5); }
+    100% { transform: scale(1); }
 }
